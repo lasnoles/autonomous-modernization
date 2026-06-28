@@ -83,7 +83,24 @@ INTAKE → INDEX → RECOVER → DISCOVER → DEBT → PLAN → EXECUTE → COMP
    flow is a discovery Gap, not an omission. If a stage returns `NEEDS_HUMAN` or
    fatal error → pause that repo, surface why, keep other repos running.
 
-3. **Enter EXECUTE.** Read the Modernization IR. For each **wave** in order:
+2b. **Approach gate (between PLAN and EXECUTE).** The planner's IR includes an
+   **`approach`** proposal — which execution playbook governs each CU/wave and the
+   discovery fact that triggered it (`architecture/execution-playbooks.md`).
+   Apply `gates.approach.approachGate`:
+   - `auto` → proceed (log the selections).
+   - `review` (default) → if **any non-default** playbook was selected, surface the
+     approach proposal as a Question (via `run-historian`: STATUS.md / status.json
+     / OKF `decisions/`+`questions/`) and **wait** for approval; all-default →
+     proceed.
+   - `always` → always surface and wait.
+   On **approve** → set `approach.status:"approved"` and continue. On **redirect**
+   → hand back to the planner to re-select. Never enter EXECUTE with an unapproved
+   approach when the gate requires approval.
+
+3. **Enter EXECUTE.** Read the Modernization IR. **Dispatch each ChangeUnit
+   through its selected `playbook`'s phases** (the playbook composes the existing
+   gated steps — characterization/untangle prefixes, port phases, etc.; the
+   `compile→validate→risk→apply` core is unchanged). For each **wave** in order:
    - Select CUs whose `dependsOn` are all `APPLIED` (cypher: "Wave-ordered,
      unblocked ChangeUnits ready to execute").
    - Run up to `maxCUsPerRepo` concurrently, each in its own git worktree.

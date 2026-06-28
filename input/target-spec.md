@@ -82,6 +82,11 @@ autonomy:                                      # how far it may go without you
                                                 #   interactive = also ask on unknown interfaces & ambiguous intent
                                                 #   manual      = ask on every gap/assumption
   onOpenQuestion: pause-scope                   # pause-scope (only the dependent repo/CU waits) | halt-run
+  approachGate: review                          # review the execution method after discovery (execution-playbooks.md §4):
+                                                #   auto   = planner picks playbooks, proceeds (logged)
+                                                #   review = (default) surface & wait if a NON-default playbook is chosen
+                                                #   always = always surface the approach proposal for approval
+                                                # complex/heterogeneous estates: keep `review` (or `always`)
 
 concurrency:
   maxRepos: 4

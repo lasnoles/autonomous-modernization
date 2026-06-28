@@ -24,6 +24,7 @@ autonomy:
   pauseAboveCeiling: true            # middle band (ceiling < risk < blockAbove) → PAUSED (matches IR gates.risk)
   blockAbove: 0.8
   requireHumanFor: [seam-extraction, security-fix]
+  approachGate: review              # auto | review (surface if any non-default playbook) | always — execution-playbooks.md §4
 
 concurrency:
   maxRepos: 4
@@ -75,8 +76,20 @@ stages:
     skill: planner
     reads: [L0, L1, L2, L3]
     writes: L4
-    emits: modernization-ir
-    guard: { irValid: true }
+    emits: [ modernization-ir, approach-proposal ]   # selects an execution playbook per CU/wave
+    guard: { irValid: true, everyChangeUnitHasPlaybook: true }
+
+  - id: approach-gate
+    state: APPROACH_GATE              # between PLAN and EXECUTE (execution-playbooks.md §4)
+    gate: "{{ autonomy.approachGate }}"   # auto | review | always
+    surfaceWhen:                      # review → surface only if a non-default playbook was chosen
+      review: "ir.approach.selections has any playbook != strangler-fig"
+      always: true
+      auto: false
+    onSurface: { raiseQuestion: approach-proposal, wait: true }   # waits for approve/redirect
+    onApprove: { set: "ir.approach.status = approved" }
+    onRedirect: { to: plan }          # planner re-selects playbooks
+    guard: { approachApproved: true }
 
   - id: execute
     state: EXECUTE
@@ -86,7 +99,7 @@ stages:
       developer: { skill: developer }   # finish/wire change, incl. against placeholders
       devops:    { skill: devops }      # build service + dependents as Podman, monitoring
       tester:    { skill: tester }      # interface mocks + prod-trace E2E scenarios
-    subWorkflow: strangler-fig
+    subWorkflow: "{{ changeUnit.playbook }}"   # dispatch through the CU's selected playbook (default strangler-fig)
     forEach: { wave: ir.waves, changeUnit: wave.changeUnits }
     with: { changeUnit: "{{ changeUnit }}", seam: "{{ changeUnit.seamRef }}", autonomy: autonomy }
     guard: { allCUsTerminal: true }

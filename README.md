@@ -142,6 +142,10 @@ L5 risk), so each stage queries rather than re-parses.
    spans by GID, never re-read whole files) and
    `architecture/multi-language-and-porting.md` (same-language modernization vs.
    cross-language ports like Java→Go).
+4e. `architecture/execution-playbooks.md` — how the planner fits the *execution
+   method* to what the scan found (playbook catalog) and lets you review/approve
+   the approach after discovery before it runs (the L2 approach gate). Best for
+   complex, heterogeneous estates.
 5. `skills/orchestrator/SKILL.md`, then the step skills in pipeline order.
 
 ## Running a modernization (conceptually)

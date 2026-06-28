@@ -1,0 +1,61 @@
+# Playbook: language-port.
+# Selected by the planner when target.language ≠ source for a scope (e.g. Java→Go).
+# A cross-language rewrite is NOT an AST recipe — it regenerates the component
+# from its language-neutral spec and proves equivalence BLACK-BOX via replay.
+# See architecture/multi-language-and-porting.md and execution-playbooks.md.
+
+apiVersion: modernization/v1
+kind: Workflow
+meta:
+  playbook: true
+  selector: "target.language != source language for this scope"
+metadata:
+  name: language-port
+  description: Regenerate a component in the target language and prove equivalence black-box, then cut over.
+
+inputs:
+  changeUnit: { type: object, required: true }       # kind: language-port, strategy: generate
+  targetLanguage: { type: string, required: true }   # e.g. go
+  portProfile: { type: string, default: "recipes/port/<lang>/profile.yaml" }
+
+phases:
+  - id: freeze-interface
+    description: Pin the component's InterfaceContract(s) — the boundary the new impl must satisfy.
+    guard: { interfaceFrozen: true }
+
+  - id: capture-spec
+    roles: [replay, tester, business-discovery]
+    description: Record prod traces + ensure rules/characterization tests are complete (gaps → placeholders).
+    guard: { executableSpecReady: true }
+
+  - id: generate
+    role: developer
+    skill: transformation-compiler            # strategy: generate (no AST recipe)
+    description: Synthesize target-language source from the spec + port profile (candidate only).
+    guard: { targetBuildsGreen: true }
+
+  - id: stand-up-both
+    role: devops
+    description: Bring up source + target impls behind an http-proxy/event-bridge seam (Podman).
+    guard: { allHealthChecksGreen: true }
+
+  - id: prove-equivalence
+    roles: [integration-verifier, replay]
+    equivalence: golden
+    description: Replay the captured journeys against both; diff outputs + check SLOs.
+    guard: { behavioralEquivalence: true }
+    onFail: { feedback: planner }             # divergence → fix-or-FAIL
+
+  - id: cutover
+    description: Shift traffic source→target (1→10→50→100%) with monitoring.
+    monitor: { slo: [latency, errorRate, businessKPIs] }
+    onBreach: { subWorkflow: rollback }       # route back to source impl (O(1))
+
+  - id: retire-source
+    description: Remove the source-language impl once stable (separate CU).
+    requiresHumanApproval: true
+
+rollback:
+  mechanism: route-back-to-source-impl
+  cost: O(1)
+events: { emitOn: every-transition, sink: run-event-store }

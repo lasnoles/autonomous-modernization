@@ -37,9 +37,25 @@ Risk gate policy:
 | `blockAbove` | 0.80 | risk > 0.80 → hard block |
 | `requireHumanFor` | `[seam-extraction, security-fix]` | always pause for human approval |
 
-`requireHumanFor` is why the Payments seam-extraction units (CU-031, CU-021)
-and the Log4j security fix (CU-031) route through human approval regardless of
-their numeric risk score.
+`requireHumanFor` is why the Payments seam-extraction unit (CU-021) and the
+Log4j security fix (CU-031) route through human approval regardless of their
+numeric risk score.
+
+## Approach (execution playbooks)
+
+PLAN also selected an **execution playbook** per ChangeUnit and emitted the
+**approach proposal** for the gate (`architecture/execution-playbooks.md`):
+
+| Scope | Playbook | Trigger |
+|-------|----------|---------|
+| Payments (CU-021) | `seam-extraction` | objective extracts Payments; extractability 0.78 |
+| default (all other CUs) | `strangler-fig` | default |
+
+No `language-port` (target stays Java), no `characterization-first` (coverage
+adequate), no `dependency-untangle`. With `approachGate: review`, the non-default
+`seam-extraction` selection surfaced a one-line approach proposal at `10:25`,
+**approved by min_than**, then EXECUTE proceeded. See
+[`../decisions/index.md`](../decisions/index.md).
 
 ## Tokens
 
@@ -48,7 +64,7 @@ their numeric risk score.
 ## Links
 
 - All ChangeUnits + status/risk: [`../change-units/index.md`](../change-units/index.md)
-- Seam-extraction units: [`../change-units/CU-031.md`](../change-units/CU-031.md),
-  [`../change-units/CU-021.md`](../change-units/CU-021.md)
+- Seam-extraction unit: [`../change-units/CU-021.md`](../change-units/CU-021.md)
+- Security-fix unit: [`../change-units/CU-031.md`](../change-units/CU-031.md)
 - Gate decisions log: [`../decisions/index.md`](../decisions/index.md)
 - Previous stage: [DEBT](DEBT.md) · Next stage: [EXECUTE](EXECUTE.md)
