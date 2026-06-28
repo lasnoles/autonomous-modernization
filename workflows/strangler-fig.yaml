@@ -1,0 +1,59 @@
+# ChangeUnit execution workflow under the strangler-fig pattern.
+# Invoked per ChangeUnit from modernization.yaml's `execute` stage. Implements
+# the ChangeUnit machine (state-machine §3). Each CU runs in its own git
+# worktree/branch; irreversible steps are gated by validation and risk.
+
+apiVersion: modernization/v1
+kind: Workflow
+metadata:
+  name: strangler-fig
+  description: Compile → validate → risk-gate → apply one ChangeUnit behind a seam, with auto-rollback.
+
+inputs:
+  changeUnit: { type: object, required: true }   # an IR ChangeUnit
+  seam: { type: object, required: false }         # the seam guarding it, if any
+
+isolation:
+  worktreePerChangeUnit: true
+  crossRepoContractLock: true                     # serialize CUs sharing a contract
+
+stages:
+  - id: compile
+    state: COMPILED
+    skill: transformation-compiler
+    produces: candidate-diff
+    onFail:
+      - retryWithFallbackStrategy: true           # strategy.fallback
+      - else: FAILED
+
+  - id: validate
+    state: VALIDATED
+    skill: validation
+    also: { when: "changeUnit.equivalence.replay == true", skill: replay }
+    guard:
+      buildGreen: true
+      testsPass: true
+      equivalenceProven: true
+      preservesRulesHold: true
+    onFail: { to: FAILED, feedback: planner }     # re-strategy or shrink CU
+
+  - id: risk
+    state: RISK_SCORED
+    skill: risk-assessment
+    produces: RiskScore
+    decision:                                     # mirrors state-machine §3 — ORDER MATTERS (first match wins)
+      - when: "changeUnit.kind in autonomy.requireHumanFor" then: PAUSED  # override, evaluated FIRST regardless of score
+      - when: "risk >= autonomy.blockAbove"            then: BLOCKED
+      - when: "risk <= autonomy.autoApplyCeiling"      then: APPLY
+      - else: PAUSED                                                       # middle band (autoApplyCeiling < risk < blockAbove)
+
+  - id: apply
+    state: APPLY
+    action: open-pr-behind-seam
+    seamDefaultOff: true
+    postApply:
+      revalidate: true
+      onRegression: { subWorkflow: rollback }
+
+terminalStates: [APPLIED, PAUSED, BLOCKED, ROLLED_BACK, FAILED]
+events: { emitOn: every-transition, sink: run-event-store }

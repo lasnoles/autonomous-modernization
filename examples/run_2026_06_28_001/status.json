@@ -1,0 +1,119 @@
+{
+  "runId": "run_2026_06_28_001",
+  "name": "billing-jakarta-payments-2026q3",
+  "status": "complete",
+  "certification": "PASS",
+  "environment": "staged",
+  "owner": "min_than_zaw@msi-global.com.sg",
+  "startedAt": "2026-06-28T10:00:00Z",
+  "completedAt": "2026-06-28T14:20:00Z",
+  "elapsed": "4h20m",
+  "updatedAt": "2026-06-28T14:20:00Z",
+  "model": "claude-opus-4-8",
+  "openQuestions": [],
+  "questions": [
+    { "id": "Q-001", "prompt": "Target language for billing-svc: Java 21, or port to Go?",
+      "blocking": true, "status": "answered", "answer": "Java 21 (modernize in place)",
+      "blocks": ["billing-svc::stage::PLAN"], "raisedBy": "planner",
+      "askedAt": "2026-06-28T10:21:00Z", "answeredAt": "2026-06-28T10:24:30Z",
+      "answeredBy": "min_than_zaw@msi-global.com.sg", "wiki": "wiki/questions/Q-001-target-language.md" }
+  ],
+  "repos": {
+    "billing-svc": {
+      "role": "primary",
+      "stage": "COMPLETE",
+      "stagesDone": [
+        "INTAKE",
+        "INDEX",
+        "RECOVER",
+        "DISCOVER",
+        "DEBT",
+        "PLAN",
+        "EXECUTE",
+        "INTEGRATE"
+      ],
+      "changeUnits": {
+        "CU-002": { "state": "APPLIED", "tokens": 21000 },
+        "CU-031": { "state": "APPLIED", "tokens": 34500 },
+        "CU-014": { "state": "APPLIED", "tokens": 47164 },
+        "CU-018": { "state": "APPLIED", "tokens": 88100 },
+        "CU-021": { "state": "APPLIED", "tokens": 63382 },
+        "CU-022": { "state": "APPLIED", "tokens": 18900 },
+        "CU-005": { "state": "APPLIED", "tokens": 99900 },
+        "CU-008": { "state": "APPLIED", "tokens": 109550 },
+        "CU-011": { "state": "APPLIED", "tokens": 119230 },
+        "CU-016": { "state": "APPLIED", "tokens": 89810 },
+        "CU-019": { "state": "APPLIED", "tokens": 104650 },
+        "CU-024": { "state": "APPLIED", "tokens": 83710 },
+        "CU-027": { "state": "APPLIED", "tokens": 98470 },
+        "CU-029": { "state": "APPLIED", "tokens": 93134 }
+      },
+      "cuRollup": { "total": 14, "applied": 14, "paused": 0, "blocked": 0 },
+      "tokens": { "in": 1119000, "out": 289900, "total": 1408900 }
+    },
+    "web-app": {
+      "role": "consumer",
+      "stage": "COMPLETE",
+      "note": "call-site updates following the billing-svc payments seam; no seam of its own",
+      "stagesDone": ["INTAKE", "INDEX", "EXECUTE", "INTEGRATE"]
+    }
+  },
+  "tokens": {
+    "in": 1131200,
+    "out": 292700,
+    "total": 1423900,
+    "costEstimateUsd": 22.40,
+    "model": "claude-opus-4-8",
+    "byStage": {
+      "INTAKE": 0,
+      "INDEX": 48100,
+      "RECOVER": 31400,
+      "DISCOVER": 27300,
+      "DEBT": 19000,
+      "PLAN": 91200,
+      "EXECUTE": 1071500,
+      "INTEGRATE": 120400,
+      "historian": 15000
+    }
+  },
+  "gaps": {
+    "open": 1,
+    "blocking": 0,
+    "items": [
+      {
+        "id": "GAP-007",
+        "summary": "external payment-provider API unknown",
+        "status": "placeholdered",
+        "blocking": false,
+        "confidence": 0.30,
+        "mockedBy": "mock-payment-provider",
+        "dependentOf": ["CU-021"],
+        "wiki": "wiki/gaps/GAP-007.md"
+      }
+    ]
+  },
+  "slo": {
+    "met": true,
+    "metrics": [
+      { "name": "p95-latency", "value": "182ms", "target": "<250ms", "status": "met" },
+      { "name": "error-rate", "value": "0.00%", "target": "<0.5%", "status": "met" },
+      { "name": "invoice-throughput", "value": "within 1% of baseline", "target": "within ±5% of baseline", "status": "met" }
+    ]
+  },
+  "e2e": {
+    "scenarios": 38,
+    "passed": 38,
+    "source": "production-traces",
+    "behavioralEquivalence": true,
+    "crossRepoJourney": "web-app -> billing-svc /api/v1/invoices",
+    "wiki": "wiki/e2e/e2e-report.md"
+  },
+  "exitCriteria": {
+    "topologyHealthy": true,
+    "e2eEquivalenceGreen": true,
+    "slosMet": true,
+    "noDanglingIntegration": true,
+    "noBlockingGaps": true
+  },
+  "cursor": { "event": 1623 }
+}

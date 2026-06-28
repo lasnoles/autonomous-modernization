@@ -1,0 +1,177 @@
+# Tool manifest — the pinned WHAT (environment-independent).
+#
+# This declares every tool a skill/stage needs, its pinned version, how to
+# VERIFY it, and a container image (preferred, host-portable). It does NOT say
+# how to install on a given host — that's adapted per environment by the
+# preflight step (`architecture/tooling-and-provisioning.md`), which always
+# converges to these pinned versions and verifies. Same input + same manifest
+# → same toolchain → reproducible diffs.
+#
+# Policy: pinned + verified. Prefer running tools via their container image so
+# host differences collapse. Host install is a fallback; ad-hoc/floating
+# installs are NOT allowed. A tool that can't be installed+verified → raise a
+# Question (open-question-resolution §5), never silently skip.
+
+manifestVersion: "1.0"
+
+defaults:
+  runtime: container            # container | host  — prefer container when available
+  onMissing: install-pinned     # install the pinned version, then re-verify
+  onUnresolved: raise-question  # can't install/verify → block + ask a human
+  recordProvenance: true        # write resolved versions + toolchainHash into provenance
+
+# ── Per-target build toolchain (DETECTED + pinned at INTAKE, per repo) ───────
+# These depend on the repo under modernization; INTAKE picks the matching pinned
+# image. Values here are defaults/examples; the run's Target Spec overrides.
+buildToolchain:
+  - id: jdk
+    version: "21"               # from target-spec target.runtime.java
+    verify: "java -version"
+    image: "docker.io/eclipse-temurin:21-jdk"
+    usedBy: [validation, transformation-compiler, devops]
+  - id: maven
+    version: "3.9.x"
+    verify: "mvn -v"
+    image: "docker.io/maven:3.9-eclipse-temurin-21"
+    usedBy: [validation, transformation-compiler]
+  - id: gradle
+    version: "8.x"
+    verify: "gradle -v"
+    image: "docker.io/gradle:8-jdk21"
+    usedBy: [validation, transformation-compiler]
+
+# ── Agent capability tools (the system's own tooling) ───────────────────────
+tools:
+  # INDEX — structural parsing
+  - id: tree-sitter
+    version: "0.21"
+    purpose: "multi-language parsing for the semantic indexer"
+    grammars: ["java@0.21", "go@0.21", "typescript@0.21", "c-sharp@0.21"]
+    verify: "tree-sitter --version"
+    install: { npm: "tree-sitter-cli@0.21", brew: "tree-sitter", apt: "tree-sitter" }
+    usedBy: [semantic-indexer]
+
+  # COMPILE — deterministic same-language engines
+  - id: openrewrite
+    version: "rewrite-recipe-bom@2.x"   # pin exact BOM in a real run
+    purpose: "Java/JVM AST recipes (preferred engine)"
+    verify: "mvn -q org.openrewrite.maven:rewrite-maven-plugin:help | grep -i rewrite"
+    runVia: ["maven-plugin", "gradle-plugin", "rewrite-cli"]
+    usedBy: [transformation-compiler]
+  - id: ts-morph
+    version: "22.x"
+    purpose: "TypeScript/JavaScript codemods"
+    verify: "node -e \"console.log(require('ts-morph/package.json').version)\""
+    install: { npm: "ts-morph@22" }
+    usedBy: [transformation-compiler]
+  - id: roslyn
+    version: "Microsoft.CodeAnalysis@4.x"
+    purpose: "C#/.NET analyzers + code fixes"
+    verify: "dotnet --version"
+    image: "mcr.microsoft.com/dotnet/sdk:8.0"
+    usedBy: [transformation-compiler]
+  # NOTE: the cross-language `generate` strategy (language-port) uses the LLM,
+  # not a binary — no tool entry; its target-language profile lives in recipes/port/.
+
+  # VALIDATE — build, coverage, mutation
+  - id: jacoco
+    version: "0.8.x"
+    purpose: "changed-code coverage"
+    verify: "echo jacoco-via-build-plugin"   # invoked through Maven/Gradle
+    usedBy: [validation]
+  - id: pitest
+    version: "1.15.x"
+    purpose: "optional mutation testing (equivalence strength)"
+    verify: "echo pit-via-build-plugin"
+    optional: true
+    usedBy: [validation]
+
+  # REPLAY / TESTER — service virtualization & containers
+  - id: wiremock
+    version: "3.x"
+    purpose: "HTTP service virtualization / mocks"
+    verify: "curl -s localhost:8080/__admin >/dev/null || echo wiremock-image"
+    image: "docker.io/wiremock/wiremock:3"
+    usedBy: [tester, replay]
+  - id: testcontainers
+    version: "1.19.x"
+    purpose: "real-protocol backends (DB/Kafka) for tests"
+    verify: "echo testcontainers-lib"
+    usedBy: [tester, validation]
+  - id: mountebank
+    version: "2.x"
+    purpose: "multi-protocol service virtualization (alt to WireMock)"
+    verify: "mb --version"
+    image: "docker.io/bbyars/mountebank:2"
+    optional: true
+    usedBy: [tester]
+
+  # DEVOPS — runtime + observability (all containers)
+  - id: podman
+    version: "4.x+"
+    purpose: "rootless containers/pods for ephemeral environments"
+    verify: "podman --version"
+    install: { brew: "podman", apt: "podman", winget: "RedHat.Podman", note: "rootless; `podman machine` on macOS/Windows" }
+    usedBy: [devops, integration-verifier, validation, tester]
+  - id: otel-collector
+    version: "0.x"
+    purpose: "traces/metrics/logs pipeline"
+    verify: "echo otel-image"
+    image: "docker.io/otel/opentelemetry-collector:latest-pinned"
+    usedBy: [devops]
+  - id: prometheus
+    version: "2.x"
+    verify: "echo prom-image"
+    image: "docker.io/prom/prometheus:v2"
+    usedBy: [devops]
+  - id: grafana
+    version: "11.x"
+    verify: "echo grafana-image"
+    image: "docker.io/grafana/grafana:11"
+    usedBy: [devops]
+  - id: loki
+    version: "3.x"
+    verify: "echo loki-image"
+    image: "docker.io/grafana/loki:3"
+    usedBy: [devops]
+
+  # DEBT — security & quality scanners
+  - id: osv-scanner
+    version: "1.x"
+    purpose: "dependency vulnerability scan (OSV)"
+    verify: "osv-scanner --version"
+    install: { go: "github.com/google/osv-scanner/cmd/osv-scanner@v1", brew: "osv-scanner" }
+    usedBy: [technical-debt]
+  - id: dependency-check
+    version: "9.x"
+    purpose: "OWASP dependency-check (CVEs)"
+    verify: "dependency-check --version"
+    image: "docker.io/owasp/dependency-check:9"
+    usedBy: [technical-debt]
+  - id: spotbugs
+    version: "4.x"
+    purpose: "static analysis / find-sec-bugs"
+    verify: "echo spotbugs-via-build-plugin"
+    optional: true
+    usedBy: [technical-debt]
+
+  # GRAPH backend (optional; portable NDJSON form needs no server)
+  - id: neo4j
+    version: "5.x"
+    purpose: "semantic graph store (live mode); skip for portable NDJSON mode"
+    verify: "echo neo4j-image"
+    image: "docker.io/neo4j:5"
+    optional: true
+    usedBy: [semantic-indexer, "all (read)"]
+
+  # COMMON
+  - id: git
+    version: "2.x"
+    verify: "git --version"
+    install: { brew: "git", apt: "git", winget: "Git.Git" }
+    usedBy: ["all"]
+  - id: jq
+    version: "1.7"
+    verify: "jq --version"
+    install: { brew: "jq", apt: "jq", winget: "jqlang.jq" }
+    usedBy: ["all"]

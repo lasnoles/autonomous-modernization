@@ -1,0 +1,54 @@
+# Rollback workflow.
+# Invoked when a post-apply regression is detected or an SLO is breached during
+# cutover. Restores the prior behavior by the cheapest safe mechanism, then
+# feeds the failure back to the planner for re-strategy.
+
+apiVersion: modernization/v1
+kind: Workflow
+metadata:
+  name: rollback
+  description: Revert a ChangeUnit to its last-good state and record why, preferring O(1) seam flips over code reverts.
+
+inputs:
+  changeUnit: { type: object, required: true }
+  reason: { type: string, required: true }        # regression | slo-breach | manual
+  seam: { type: object, required: false }
+
+# Choose the cheapest reversible mechanism available.
+strategy:
+  - when: "seam != null"
+    do: flip-flag-to-previous                      # O(1) — preferred
+  - when: "changeUnit.rollback == 'revert-commit'"
+    do: revert-pr-commit
+  - else:
+    do: restore-from-snapshot                      # replay run-snapshot of last-good
+
+stages:
+  - id: halt
+    action: stop-further-rollout                   # freeze cutover immediately
+
+  - id: revert
+    action: "{{ strategy }}"
+    guard: { previousBehaviorRestored: true }
+
+  - id: verify
+    skill: validation
+    equivalence: behavioral
+    guard: { buildGreen: true, testsPass: true }
+
+  - id: record
+    action: mark-change-unit
+    setStatus: ROLLED_BACK
+    annotate:
+      reason: "{{ reason }}"
+      evidence: [regression-diff, slo-snapshot]
+
+  - id: feedback
+    action: notify-planner
+    payload: { changeUnit: "{{ changeUnit.id }}", outcome: ROLLED_BACK, reason: "{{ reason }}" }
+    # planner may re-strategy: switch recipe→llm-patch, shrink CU, or block.
+
+postconditions:
+  - systemAtLastGoodBehavior: true
+  - auditTrailUpdated: true
+events: { emitOn: every-transition, sink: run-event-store }
