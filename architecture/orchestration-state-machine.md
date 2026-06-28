@@ -39,12 +39,18 @@ per CU during the apply stages and can execute many CUs concurrently
         └────┬─────┘
              ▼
         ┌──────────┐
-        │   PLAN   │  → skill: planner                 (emits Modernization IR, writes L4)
-        └────┬─────┘
+        │   PLAN   │  → skill: planner  (emits Modernization IR + selects execution
+        └────┬─────┘     playbooks per CU/wave = the approach proposal; writes L4)
+             ▼
+        ╓──────────╖
+        ║ APPROACH ║  gate: review the selected playbooks (approach proposal) — auto |
+        ║   GATE   ║  review (default; surface if any non-default playbook) | always.
+        ╙────┬─────╜  Non-approved approach ⇒ wait (Question). See execution-playbooks.md §4.
              ▼
         ┌──────────┐
         │ EXECUTE  │  ── spawns ChangeUnit machine per CU, wave by wave ──┐
-        └────┬─────┘   (roles: developer + devops + tester — see §8)      │
+        └────┬─────┘   (roles: developer + devops + tester — see §8;       │
+             │          each CU runs through its selected playbook's phases)│
              ▼                                                            │
         ┌──────────┐                                                      │
         │INTEGRATE │  → skill: integration-verifier                       │

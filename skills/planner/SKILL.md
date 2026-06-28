@@ -146,12 +146,29 @@ ChangeUnit `props` mirror the IR 1:1 (node-types.md §L4).
    to guarantee O(1) rollback, do not plan the extraction blind — emit
    `NEEDS_HUMAN`.
 
+9b. **Select an execution playbook per ChangeUnit/wave (the approach).** From the
+    vetted catalog (`architecture/execution-playbooks.md` §2), pick the method
+    each scope needs, driven by discovery facts (§3 selection):
+    - `target.language` ≠ source for the scope → **`language-port`**
+    - changed-code coverage < `coverageFloor` → **`characterization-first`** (+ inner)
+    - scope on a dependency cycle / coupling > cap → **`dependency-untangle`** (+ inner)
+    - `kind == seam-extraction` → **`seam-extraction`**; tiny low-risk leaf → `big-bang-with-replay`
+    - else → **`strangler-fig`** (default)
+    Stamp `ChangeUnit.playbook` and assemble the IR **`approach`** block (§4b):
+    each `selection` records `scope`, `playbook`, the `trigger` fact, and a
+    `rationale`. Select **only from the catalog** — a scope no playbook fits gets a
+    `manual` CU + a `Question`, never invented control flow. Set
+    `approach.gate.policy` from `autonomy.approachGate` (auto | review | always)
+    and `status: "proposed"`. This proposal is what the **approach gate** (between
+    PLAN and EXECUTE) reviews.
+
 10. **Set Gates (autonomy controls).** Populate IR §5:
     - `validation`: `requireGreenBuild`, `minCoverageDelta`, `requireEquivalence`.
     - `risk`: `autoApplyCeiling`, `pauseAboveCeiling`, `blockAbove` from the run
       config — these drive the CU machine's auto/pause/block decision.
     - `review.requireHumanFor`: CU `kind`s that always pause regardless of score
       (default `["seam-extraction","security-fix"]`).
+    - `approach.approachGate`: `auto | review | always` for the approach gate.
 
 11. **Emit IR + L4.** Assemble the IR document (§1 envelope with `irVersion`,
     `runId`, `scope`, `waves`, `changeUnits`, `seams`, `gates`), validate it

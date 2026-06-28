@@ -20,6 +20,7 @@ lowers IR into concrete recipes/patches.
   "waves": [ /* ordered groups of change-units, see §3 */ ],
   "changeUnits": [ /* see §2 */ ],
   "seams": [ /* see §4 */ ],
+  "approach": { /* selected execution playbooks + approach gate, see §4b */ },
   "gates": { /* see §5 */ }
 }
 ```
@@ -34,6 +35,7 @@ rollback-able change. It maps 1:1 to a `ChangeUnit` node in the graph (L4).
   "id": "CU-014",
   "title": "Replace javax.* with jakarta.* in billing-svc",
   "kind": "api-migration",          // see §2.1
+  "playbook": "strangler-fig",      // execution playbook governing this CU (see architecture/execution-playbooks.md)
   "repo": "billing-svc",
   "targets": [                      // graph GIDs this CU edits
     "billing-svc::Package::com.acme.billing",
@@ -105,13 +107,38 @@ make incremental, reversible cutover possible.
 }
 ```
 
+## 4b. Approach — selected execution playbooks (L2)
+
+The planner selects an **execution playbook** per ChangeUnit/wave from the vetted
+catalog (`architecture/execution-playbooks.md`) based on discovery facts, and
+records the selection + the fact that triggered it. The `approach` block is what
+the **post-discovery approach gate** reviews before EXECUTE.
+
+```jsonc
+{
+  "status": "proposed",              // proposed | approved | redirected
+  "selections": [
+    { "scope": "billing-svc::Component::Payments", "playbook": "language-port",
+      "trigger": "target.language=go for portScope", "rationale": "cross-language rewrite" },
+    { "scope": "billing-svc::Component::Reporting", "playbook": "characterization-first",
+      "trigger": "changed-code coverage 12% < coverageFloor 40%", "rationale": "pin behavior before edits" },
+    { "scope": "default", "playbook": "strangler-fig", "trigger": "default" }
+  ],
+  "gate": { "policy": "review", "requireApproval": true, "approvedBy": null, "approvedAt": null }
+}
+```
+
+Each ChangeUnit's chosen playbook is also stamped on the CU (`ChangeUnit.playbook`,
+§2). EXECUTE dispatches each CU through its playbook's phases.
+
 ## 5. Gates — autonomy controls
 
 ```jsonc
 {
   "validation": { "requireGreenBuild": true, "minCoverageDelta": 0.0, "requireEquivalence": true },
   "risk":       { "autoApplyCeiling": 0.4, "pauseAboveCeiling": true, "blockAbove": 0.8 },
-  "review":     { "requireHumanFor": ["seam-extraction", "security-fix"] }
+  "review":     { "requireHumanFor": ["seam-extraction", "security-fix"] },
+  "approach":   { "approachGate": "review" }   // auto | review (default) | always — see execution-playbooks.md §4
 }
 ```
 
