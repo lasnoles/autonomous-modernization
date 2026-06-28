@@ -1,0 +1,20 @@
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor backups
+*~
+*.swp
+
+# Runtime / generated (this repo is the design + skill spec; runs produce these)
+/wiki/
+/artifacts/
+*.log
+node_modules/
+__pycache__/
+.env

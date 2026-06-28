@@ -1,0 +1,49 @@
+{
+  "runId": "run_2026_06_28_001",
+  "name": "billing-jakarta-payments-2026q3",
+  "updatedAt": "2026-06-28T14:20:00Z",
+  "status": "complete",
+  "environment": "staged",
+  "startedAt": "2026-06-28T10:00:00Z",
+  "completedAt": "2026-06-28T14:20:00Z",
+  "openQuestions": [],
+  "answeredQuestions": [
+    { "id": "Q-001", "status": "answered", "answer": "Java 21 (modernize in place)",
+      "answeredAt": "2026-06-28T10:24:30Z" }
+  ],
+  "repos": {
+    "billing-svc": {
+      "stage": "COMPLETE",
+      "stagesDone": [
+        "INTAKE",
+        "INDEX",
+        "RECOVER",
+        "DISCOVER",
+        "DEBT",
+        "PLAN",
+        "EXECUTE",
+        "INTEGRATE"
+      ],
+      "changeUnits": {
+        "CU-002": { "state": "APPLIED", "tokens": { "in": 16674, "out": 4326, "total": 21000 } },
+        "CU-031": { "state": "APPLIED", "appliedAt": "2026-06-28T13:05:00Z", "wasPaused": { "reason": "requireHumanFor:security-fix", "approvedAt": "2026-06-28T13:05:00Z" }, "tokens": { "in": 27392, "out": 7108, "total": 34500 } },
+        "CU-014": { "state": "APPLIED", "tokens": { "in": 37452, "out": 9712, "total": 47164 } },
+        "CU-018": { "state": "APPLIED", "tokens": { "in": 69951, "out": 18149, "total": 88100 } },
+        "CU-021": { "state": "APPLIED", "appliedAt": "2026-06-28T13:50:00Z", "wasPaused": { "reason": "requireHumanFor:seam-extraction", "approvedAt": "2026-06-28T13:05:00Z" }, "tokens": { "in": 50330, "out": 13052, "total": 63382 } },
+        "CU-022": { "state": "APPLIED", "tokens": { "in": 15007, "out": 3893, "total": 18900 } },
+        "CU-005": { "state": "APPLIED", "tokens": { "in": 79348, "out": 20552, "total": 99900 } },
+        "CU-008": { "state": "APPLIED", "tokens": { "in": 87012, "out": 22538, "total": 109550 } },
+        "CU-011": { "state": "APPLIED", "tokens": { "in": 94703, "out": 24527, "total": 119230 } },
+        "CU-016": { "state": "APPLIED", "tokens": { "in": 71338, "out": 18472, "total": 89810 } },
+        "CU-019": { "state": "APPLIED", "tokens": { "in": 83122, "out": 21528, "total": 104650 } },
+        "CU-024": { "state": "APPLIED", "tokens": { "in": 66490, "out": 17220, "total": 83710 } },
+        "CU-027": { "state": "APPLIED", "tokens": { "in": 78215, "out": 20255, "total": 98470 } },
+        "CU-029": { "state": "APPLIED", "tokens": { "in": 73765, "out": 19369, "total": 93134 } }
+      },
+      "cuRollup": { "total": 14, "applied": 14, "paused": 0, "blocked": 0 },
+      "tokens": { "in": 1119000, "out": 289900, "total": 1408900 }
+    }
+  },
+  "tokens": { "in": 1131200, "out": 292700, "total": 1423900, "model": "claude-opus-4-8", "costEstimateUsd": 22.40 },
+  "cursor": { "event": 1623 }
+}
