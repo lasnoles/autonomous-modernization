@@ -13,182 +13,143 @@ description: >-
 
 # Planner — From Understanding to an Executable, Reversible Plan
 
-You are the **strategist**. The analysis stages have built a complete picture
-of the system; your job is to decide *what to change, in what order, and how
-each change will be proven safe and undone* — without committing to a concrete
-transformation engine. Your single deliverable is the **Modernization IR**,
-which is the compiler's input and the orchestrator's execution program.
+You are the **strategist**: decide *what to change, in what order, and how each
+change is proven safe and undone* — without picking a concrete transformation
+engine. Single deliverable: the **Modernization IR** (the compiler's input, the
+orchestrator's execution program). You do NOT transform/compile/validate/apply;
+every decision you encode is later enforced, so it must be precise.
 
-Read these contracts before acting and treat them as authoritative:
-
-- `architecture/modernization-ir.md` — **the exact output format** (your contract)
-- `architecture/semantic-graph-schema.md` + `graph/*` — the facts you read (L0–L3) and write (L4)
-- `architecture/orchestration-state-machine.md` — how your IR is executed (CU lifecycle)
-- `architecture/system-design.md` — deterministic-first / behavior-preserving principles
-
-You do **not** transform, compile, validate, or apply code. You plan. Every
-decision you encode is later enforced by other skills, so it must be precise.
+Authoritative contracts: `architecture/modernization-ir.md` (**exact output
+format** — your contract) · `architecture/semantic-graph-schema.md` + `graph/*`
+(facts you read L0–L3, write L4) · `architecture/orchestration-state-machine.md`
+(how the IR executes — CU lifecycle) · `architecture/system-design.md`
+(deterministic-first / behavior-preserving).
 
 ## When to use
-
-- The repo machine has reached `PLAN` (DEBT completed, L0–L3 written `status=ok`).
-- "Re-plan CU-014" — a CU came back `FAILED`/`ROLLED_BACK`/`BLOCKED` and needs a
-  new strategy, finer decomposition, or a different seam.
+- Repo machine reached `PLAN` (DEBT done, L0–L3 written `status=ok`).
+- "Re-plan CU-014" — a CU came back `FAILED`/`ROLLED_BACK`/`BLOCKED`; needs new strategy, finer decomposition, or a different seam.
 - "Why is this wave ordered this way?" — explain the plan from the L4 graph.
 
 ## Inputs / Outputs
+**In:** semantic graph **L0–L3** read-only — structure; architecture
+(Components/Layers/Seams + `extractability`); business (Capabilities/BusinessRules
++ `IMPLEMENTS_RULE`/`REALIZES_CAPABILITY`); debt (DebtItems/Vulnerabilities/
+Hotspots + `HAS_DEBT`/`EXPOSED_TO`) · the **run objective + constraints**
+(`scope.objective`, `scope.constraints`, autonomy ceilings) — e.g. "Java 8 → 21,
+Spring Boot 1 → 3, extract payments seam; no public-API behavior change; ≤1
+service per wave".
 
-**Inputs**
-- The semantic graph, layers **L0–L3** (read-only): structure, architecture
-  (Components/Layers/Seams + `extractability`), business
-  (Capabilities/BusinessRules + `IMPLEMENTS_RULE`/`REALIZES_CAPABILITY`), and
-  debt (DebtItems/Vulnerabilities/Hotspots + `HAS_DEBT`/`EXPOSED_TO`).
-- The **run objective and constraints** from the run config (`scope.objective`,
-  `scope.constraints`, autonomy ceilings) — e.g. "Java 8 → 21, Spring Boot 1 →
-  3, extract payments seam; no public-API behavior change; ≤1 service per wave".
+**Out:** the **Modernization IR document** per `modernization-ir.md` (§1 envelope,
+§2 ChangeUnits, §3 Waves, §4 Seams, §5 Gates) → artifact store
+(`artifacts/<runId>/<repo>/ir.json`) · **L4 graph**: `ChangeUnit`/`Wave` nodes +
+`TRANSFORMS`/`PRECEDES`/`IN_WAVE`/`GUARDS`/`ADDRESSES`/`PRESERVES` edges ·
+`status=ok` (or `NEEDS_HUMAN` if objective infeasible under constraints — e.g. a
+required seam has near-zero extractability).
 
-**Outputs**
-- The **Modernization IR document** conforming to `modernization-ir.md`
-  (§1 top-level, §2 ChangeUnits, §3 Waves, §4 Seams, §5 Gates), written to the
-  artifact store (e.g. `artifacts/<runId>/<repo>/ir.json`).
-- **L4 graph**: `ChangeUnit` and `Wave` nodes and the edges
-  `TRANSFORMS`, `PRECEDES`, `IN_WAVE`, `GUARDS`, `ADDRESSES`, `PRESERVES`.
-- `status=ok` for the PLAN stage (or `NEEDS_HUMAN` if the objective is
-  infeasible under constraints — e.g. a required seam has near-zero
-  extractability).
-
-Query the graph; never re-parse source (semantic-graph-schema §6). All CU
-ChangeUnit `props` mirror the IR 1:1 (node-types.md §L4).
+Query the graph; never re-parse source (semantic-graph-schema §6). CU `props`
+mirror the IR 1:1 (node-types.md §L4).
 
 ## Procedure
+```
+1. TARGET END-STATE: resolve scope.objective → concrete graph deltas (target lang
+   level, framework/dep versions, components to extract). Pin scope.constraints as
+   HARD rules (e.g. "≤1 service/wave" → wave-packing cap; "no public-API behavior
+   change" → every CU touching isPublicApi:true gets equivalence.level ≥ behavioral).
 
-1. **Translate the objective into a target end-state.** Resolve
-   `scope.objective` into concrete deltas against the graph: target language
-   level, target framework/dependency versions, components to extract. Pin the
-   constraints (`scope.constraints`) as hard rules the plan must satisfy
-   (e.g. "max 1 service extracted per wave" → a wave packing constraint;
-   "no behavior change to public API" → every CU touching `isPublicApi:true`
-   classes gets `equivalence.level ≥ behavioral`).
+2. CANDIDATE CHANGES, per component, PAGING the ranked backlog in execution.batchSize
+   batches (scalability-and-retrieval.md §1a) — emit CUs per batch and PERSIST before
+   reading the next; never load whole L3 backlog into context:
+     • L3: each open DebtItem/Vulnerability in scope → candidate (later ADDRESSES)
+       (cypher "Open debt within a component, ranked" — use SKIP/LIMIT;
+        "Deprecated-API usage to migrate").
+     • objective: framework/lang migrations + requested seam extractions, even with
+       no DebtItem.
+     • dedup where one transform resolves many debt items (one javax→jakarta recipe
+       addresses many deprecated-api items).
 
-2. **Derive candidate changes from debt + objective.** Enumerate the work
-   **per component, paging the ranked backlog in `execution.batchSize` batches**
-   (`architecture/scalability-and-retrieval.md` §1a) — emit ChangeUnits for each
-   batch and persist them before reading the next, rather than loading the whole
-   L3 backlog into context:
-   - From **L3**: each open `DebtItem`/`Vulnerability` in scope becomes a
-     candidate change, linked later via `ADDRESSES`
-     (cypher: "Open debt within a component, ranked" — use its `SKIP`/`LIMIT`;
-     "Deprecated-API usage to migrate").
-   - From the **objective**: framework/language migrations and the requested
-     seam extractions, even where no DebtItem exists.
-   - Deduplicate where one transformation resolves several debt items
-     (e.g. one `javax→jakarta` recipe addresses many `deprecated-api` items).
+3. DECOMPOSE → ATOMIC CUs sized to blast radius (IR §2 = smallest independently-
+   validatable, independently-rollback-able change). Split until each CU:
+     • coherent single-purpose intent + one kind (IR §2.1);
+     • bounded blast radius — compute {files, callersAffected, crossRepo} from graph
+       (cypher "Blast radius of a ChangeUnit", "Transitive callers of a method"); if it
+       would touch a whole subsystem, slice (by package/component/API surface) into CUs
+       joined by PRECEDES;
+     • revertible on its own without stranding another CU.
 
-3. **Decompose into ATOMIC ChangeUnits sized to blast radius.** A ChangeUnit is
-   the smallest independently-validatable, independently-rollback-able change
-   (IR §2). Split until each CU:
-   - has a coherent, single-purpose intent and one `kind` (IR §2.1);
-   - has a **bounded blast radius** — compute `{files, callersAffected,
-     crossRepo}` from the graph (cypher: "Blast radius of a ChangeUnit",
-     "Transitive callers of a method"). If a candidate would touch a whole
-     subsystem, slice it (by package, by component, by API surface) into
-     several CUs joined by `PRECEDES`;
-   - can be reverted on its own without stranding another CU.
+4. STRATEGY (deterministic preferred, llm-patch fallback) — honor deterministic-first
+   (system-design §2.1); draw recipe ids from the ACTIVE language profile's engine +
+   catalog (language-profiles.md → recipeEngine/recipeCatalog): recipes/openrewrite/ for
+   java, recipes/python/ (LibCST/ruff/pyupgrade) for python, etc. Set strategy.preferred:
+     • recipe/codemod — named transform exists in profile catalog (java e.g.
+       openrewrite:…JavaxToJakarta; python e.g. python:pyupgrade.to-py312,
+       python:libcst.rename-symbol) — default for migrations/upgrades;
+     • codemod/manual — mechanical or genuinely bespoke edits;
+     • llm-patch — only when no recipe covers it.
+   ALWAYS set strategy.fallback (usually llm-patch) so recipe failure recovers via the CU
+   machine (state-machine §7) without re-planning.
 
-4. **Assign a strategy (deterministic preferred, llm-patch fallback).** Honor
-   deterministic-first (system-design §2.1) and draw recipe ids from the active
-   language profile's engine + catalog (`architecture/language-profiles.md` →
-   `recipeEngine`/`recipeCatalog`): `recipes/openrewrite/` for **java**,
-   `recipes/python/` (LibCST/ruff/pyupgrade) for **python**, etc. For each CU set
-   `strategy.preferred`:
-   - `recipe`/`codemod` when a named transform exists in the profile's catalog
-     (java e.g. `openrewrite:…JavaxToJakarta`; python e.g.
-     `python:pyupgrade.to-py312`, `python:libcst.rename-symbol`) — the
-     default for migrations/upgrades;
-   - `codemod`/`manual` for mechanical or genuinely bespoke edits;
-   - `llm-patch` only when no recipe covers it.
-   Always set `strategy.fallback` (usually `llm-patch`) so a recipe failure has
-   a recovery path the CU machine can take (state-machine §7) without re-planning.
+5. EQUIVALENCE LEVEL (proof obligation for validation; IR §2 equivalence, §7) — be
+   conservative, escalate when in doubt; "no behavior change" forbids syntactic on
+   public-API CUs:
+     • syntactic  — provably semantics-preserving rename/namespace shifts only;
+     • behavioral — build + tests pass (default for public-API/business-logic);
+                     set tests:["existing","generate-if-missing"];
+     • golden     — characterization/replay where tests thin; set replay:true (orchestrator
+                     also invokes the replay skill).
 
-5. **Assign an equivalence level.** This is the proof obligation the validation
-   stage must discharge (IR §2 `equivalence`, §7):
-   - `syntactic` — provably semantics-preserving rename/namespace shifts only;
-   - `behavioral` — build + tests must pass (default for anything touching
-     public API or business logic); set `tests:["existing","generate-if-missing"]`;
-   - `golden` — characterization/replay where tests are thin; set `replay:true`
-     so the orchestrator also invokes the `replay` skill.
-   Be conservative: when in doubt, escalate the level. A constraint like
-   "no behavior change" forbids `syntactic` on public-API CUs.
+6. PRESERVES — pin behavior that must survive. Query business rules/capabilities each CU's
+   targets enforce (cypher "Business rules a change would touch"; "Capability footprint"),
+   record in businessRefs, emit PRESERVES. These are the equivalence oracle: a behavioral CU
+   with PRESERVES rules but no resolvable validation plan is an invariant violation.
 
-6. **Link PRESERVES — pin the behavior that must survive.** For each CU, query
-   the business rules and capabilities its targets enforce
-   (cypher: "Business rules a change would touch";
-   "Capability footprint") and record them in `businessRefs`, emitting
-   `PRESERVES` edges. These become the equivalence oracle: a behavioral CU with
-   `PRESERVES` rules but no resolvable validation plan is an invariant violation
-   (see Quality below).
+7. DEPENDENCIES (PRECEDES) — order by real constraints: decouple before upgrade
+   (seam/abstraction first); upgrade libs before code targeting new API; migrate namespaces
+   before framework upgrade; fix blocking vulns early. Each → a dependsOn entry (IR) + a
+   PRECEDES edge with reason. Must be a DAG — break any cycle by further decomposition.
 
-7. **Compute dependencies (PRECEDES).** Order CUs by their real constraints:
-   decouple before upgrade (seam/abstraction first), upgrade libraries before
-   the code that targets the new API, migrate namespaces before framework
-   upgrade, fix blocking vulnerabilities early. Encode each as a `dependsOn`
-   entry (IR) and a `PRECEDES` edge with a `reason`. The result must be a DAG —
-   reject/break any cycle by further decomposition.
+8. WAVES — topo-sort the DAG into ordered waves (IR §3): a wave = mutually-parallel CUs;
+   waves run in sequence. Within topo order, pack CUs that are independent AND compatible on
+   blast radius + risk (see Wave computation), honoring constraints (≤1 seam-extraction/wave).
+   Set parallelizable + a concrete exitCriteria per wave; emit IN_WAVE edges + Wave nodes
+   (order, parallelizable, exitCriteria).
 
-8. **Topologically sort into Waves.** Group the DAG into ordered waves
-   (IR §3): a wave is CUs that may run in parallel; waves run in sequence.
-   Within the topo order, pack a wave with CUs that are mutually independent
-   **and** compatible on blast radius and risk (see "Wave computation" below),
-   honoring constraints (e.g. ≤1 `seam-extraction` per wave). Set
-   `parallelizable` and a concrete `exitCriteria` per wave; emit `IN_WAVE` edges
-   and `Wave` nodes (`order`, `parallelizable`, `exitCriteria`).
+9. SEAMS where extractability is high. Per requested/advisable strangler boundary, use L1
+   Seam/Component extractability (cypher "Component coupling (extraction difficulty)") to pick
+   a cleanly-cuttable boundary. Refine the L1 candidate into an IR Seam (§4): pick kind, the
+   introduces indirection, routing mechanism, cutover, and — MANDATORY — a rollback that is
+   O(1) (flip-flag / route change), never a code revert. Emit GUARDS from Seam → every
+   seam-extraction CU it protects. If extractability too low to guarantee O(1) rollback, do not
+   plan the extraction blind — emit NEEDS_HUMAN.
 
-9. **Place Seams where extractability is high.** For each requested or
-   advisable strangler boundary, use the L1 recovered `Seam`/`Component`
-   `extractability` (cypher: "Component coupling (extraction difficulty)") to
-   choose a boundary that can be cleanly cut. Refine the L1 candidate into an
-   IR `Seam` (§4): pick `kind`, the `introduces` indirection, the `routing`
-   mechanism, `cutover`, and — mandatory — a `rollback` that is **O(1)**
-   (`flip-flag` / route change), never a code revert. Emit `GUARDS` from the
-   Seam to every `seam-extraction` CU it protects. If extractability is too low
-   to guarantee O(1) rollback, do not plan the extraction blind — emit
-   `NEEDS_HUMAN`.
+9b. PLAYBOOK per CU/wave (the approach) — from the vetted catalog (execution-playbooks.md §2),
+    pick the method each scope needs, driven by discovery facts (§3 selection):
+      • target.language ≠ source for scope        → language-port
+      • changed-code coverage < coverageFloor      → characterization-first (+ inner)
+      • scope on dep cycle / coupling > cap        → dependency-untangle (+ inner)
+      • kind == seam-extraction                    → seam-extraction; tiny low-risk leaf → big-bang-with-replay
+      • else                                       → strangler-fig (default)
+    Stamp ChangeUnit.playbook; assemble IR approach block (§4b): each selection records scope,
+    playbook, the trigger fact, rationale. Select ONLY from the catalog — a scope no playbook fits
+    gets a manual CU + a Question, never invented control flow. Set approach.gate.policy from
+    autonomy.approachGate (auto | review | always) and status:"proposed" — what the approach gate
+    (between PLAN and EXECUTE) reviews.
 
-9b. **Select an execution playbook per ChangeUnit/wave (the approach).** From the
-    vetted catalog (`architecture/execution-playbooks.md` §2), pick the method
-    each scope needs, driven by discovery facts (§3 selection):
-    - `target.language` ≠ source for the scope → **`language-port`**
-    - changed-code coverage < `coverageFloor` → **`characterization-first`** (+ inner)
-    - scope on a dependency cycle / coupling > cap → **`dependency-untangle`** (+ inner)
-    - `kind == seam-extraction` → **`seam-extraction`**; tiny low-risk leaf → `big-bang-with-replay`
-    - else → **`strangler-fig`** (default)
-    Stamp `ChangeUnit.playbook` and assemble the IR **`approach`** block (§4b):
-    each `selection` records `scope`, `playbook`, the `trigger` fact, and a
-    `rationale`. Select **only from the catalog** — a scope no playbook fits gets a
-    `manual` CU + a `Question`, never invented control flow. Set
-    `approach.gate.policy` from `autonomy.approachGate` (auto | review | always)
-    and `status: "proposed"`. This proposal is what the **approach gate** (between
-    PLAN and EXECUTE) reviews.
+10. GATES (autonomy controls; IR §5):
+      • validation: requireGreenBuild, minCoverageDelta, requireEquivalence.
+      • risk: autoApplyCeiling, pauseAboveCeiling, blockAbove (from run config) — drive the CU
+        machine's auto/pause/block decision.
+      • review.requireHumanFor: CU kinds that always pause regardless of score
+        (default ["seam-extraction","security-fix"]).
+      • approach.approachGate: auto | review | always.
 
-10. **Set Gates (autonomy controls).** Populate IR §5:
-    - `validation`: `requireGreenBuild`, `minCoverageDelta`, `requireEquivalence`.
-    - `risk`: `autoApplyCeiling`, `pauseAboveCeiling`, `blockAbove` from the run
-      config — these drive the CU machine's auto/pause/block decision.
-    - `review.requireHumanFor`: CU `kind`s that always pause regardless of score
-      (default `["seam-extraction","security-fix"]`).
-    - `approach.approachGate`: `auto | review | always` for the approach gate.
-
-11. **Emit IR + L4.** Assemble the IR document (§1 envelope with `irVersion`,
-    `runId`, `scope`, `waves`, `changeUnits`, `seams`, `gates`), validate it
-    against every invariant below, write it to the artifact store, and write the
-    L4 nodes/edges to the graph. Set each CU `status:"PLANNED"`. Report
-    `status=ok`.
+11. EMIT IR + L4: assemble the IR doc (§1 envelope: irVersion, runId, scope, waves, changeUnits,
+    seams, gates), validate against EVERY invariant below, write to artifact store, write L4
+    nodes/edges. Set each CU status:"PLANNED". Report status=ok.
+```
 
 ## Worked mini-example (IR fragment)
-
-Two ChangeUnits consistent with `modernization-ir.md` §2/§4: a Jakarta
-namespace migration (recipe, behavioral) and a payments seam-extraction
-(O(1) rollback behind a flag), plus the seam that guards it.
+Two CUs per `modernization-ir.md` §2/§4: a Jakarta namespace migration (recipe,
+behavioral) and a payments seam-extraction (O(1) rollback behind a flag), plus its guarding seam.
 
 ```jsonc
 {
@@ -251,100 +212,56 @@ namespace migration (recipe, behavioral) and a payments seam-extraction
 }
 ```
 
-Graph consequence of the above: `CU-014 -TRANSFORMS-> Package/Class`,
-`CU-014 -ADDRESSES-> DebtItem::deprecated-javax`, `CU-014 -PRESERVES->
-Capability::Invoicing`, `CU-002 -PRECEDES-> CU-014`; `SEAM-payments -GUARDS->
-CU-021`, `CU-014 -PRECEDES-> CU-021`; both CUs `-IN_WAVE->` their wave.
+Graph consequence: `CU-014 -TRANSFORMS-> Package/Class`, `CU-014 -ADDRESSES->
+DebtItem::deprecated-javax`, `CU-014 -PRESERVES-> Capability::Invoicing`,
+`CU-002 -PRECEDES-> CU-014`; `SEAM-payments -GUARDS-> CU-021`, `CU-014 -PRECEDES->
+CU-021`; both CUs `-IN_WAVE->` their wave.
 
 ## IR invariants the planner MUST guarantee
+Mirror `modernization-ir.md` §7 + ontology rules; validate before emitting. A failure here is a planning bug.
+- **Every CU references ≥1 graph target.** `targets` non-empty, every GID resolves to a real L0–L1 node, each yields a `TRANSFORMS` edge (ontology §3.4: no orphan plan nodes).
+- **Behavioral/golden CUs resolve to a validation plan.** Any CU with `equivalence.level != syntactic` must specify `tests` (and/or `replay:true`) the validation stage can execute — else it never reaches APPLIED (state-machine §3 guard).
+- **Seam-extraction CUs have O(1) rollback.** Every such CU has `rollback` ∈ {`flip-flag`, route change} + a `GUARDS` seam whose `rollback` is likewise O(1) — never `revert-commit`.
+- **No CU before its deps.** `dependsOn`/`PRECEDES` is a DAG (no cycles); every referenced CU id exists; wave order respects it — a CU never shares a wave with, or precedes, its own dependency.
+- **Downward references only.** L4 → L0–L3, never reverse (ontology §3.2); cross-repo `TRANSFORMS` targets set `crossRepo`/`contract` on the edge (edge-types §Cross-repo) and on `blastRadius.crossRepo`.
+- **Constraints honored.** Every `scope.constraints` rule satisfied (wave-packing caps, no-behavior-change → equivalence floor).
 
-These mirror `modernization-ir.md` §7 and the ontology rules — validate them
-before emitting. A failure here is a planning bug, not a downstream concern.
-
-- **Every CU references ≥1 graph target.** `targets` is non-empty and every GID
-  resolves to a real L0–L1 node; each yields a `TRANSFORMS` edge (ontology §3.4:
-  no orphan plan nodes).
-- **Behavioral/golden CUs resolve to a validation plan.** Any CU with
-  `equivalence.level != syntactic` must specify `tests` (and/or `replay:true`)
-  that the validation stage can execute — otherwise it can never reach APPLIED
-  (state-machine §3 guard).
-- **Seam-extraction CUs have O(1) rollback.** Every `seam-extraction` CU has
-  `rollback` ∈ {`flip-flag`, route change} and a `GUARDS` seam whose `rollback`
-  is likewise O(1) — never `revert-commit`.
-- **No CU before its deps.** `dependsOn`/`PRECEDES` is a DAG (no cycles); every
-  referenced CU id exists; and the wave order respects it — a CU never shares a
-  wave with, or precedes, one of its own dependencies.
-- **Downward references only.** L4 nodes reference L0–L3, never the reverse
-  (ontology §3.2); cross-repo `TRANSFORMS` targets set `crossRepo`/`contract`
-  on the edge (edge-types §Cross-repo) and on `blastRadius.crossRepo`.
-- **Constraints honored.** Every `scope.constraints` rule is satisfied by the
-  plan (e.g. wave packing caps, no-behavior-change → equivalence floor).
-
-## Wave computation & the parallelism / blast-radius / risk trade-off
-
+## Wave computation — parallelism / blast-radius / risk trade-off
 Waves are a topological layering of the `PRECEDES` DAG, refined by packing:
-
-1. **Layer** the DAG — wave *n* is the CUs whose dependencies are all in waves
-   `< n`. This is the minimum legal ordering (cypher: "Wave-ordered, unblocked
-   ChangeUnits ready to execute" is what the orchestrator uses at runtime).
+1. **Layer** — wave *n* = CUs whose deps are all in waves `< n` (minimum legal ordering; cypher "Wave-ordered, unblocked ChangeUnits ready to execute" is what the orchestrator uses at runtime).
 2. **Pack within a layer**, trading three forces:
-   - **Parallelism** — more CUs per wave = faster runs; bounded by
-     `maxCUsPerRepo` at execution time, so do not over-pack.
-   - **Blast radius** — CUs whose target/caller sets overlap should not run in
-     parallel (their post-apply validations interfere and rollback gets
-     entangled); split overlapping CUs into separate waves even if independent.
-   - **Risk** — concentrate high-risk CUs (large blast radius, low coverage,
-     high business criticality, `seam-extraction`/`security-fix`) into small,
-     often singleton waves so a pause/rollback costs little and is easy to
-     attribute. Low-risk mechanical CUs (e.g. dependency bumps) pack widely.
-3. **Sequence by strategy** — "decouple before upgrade": seam/abstraction waves
-   precede the upgrades they protect, so risky changes land behind an already-
-   reversible boundary. Honor constraints (e.g. ≤1 `seam-extraction` per wave).
-4. **Exit criteria** — each wave's `exitCriteria` states what "green" means
-   (all CUs validated, no new arch violations) so the orchestrator can gate the
-   next wave.
+   - **Parallelism** — more CUs/wave = faster; bounded by `maxCUsPerRepo` at execution time, so don't over-pack.
+   - **Blast radius** — CUs with overlapping target/caller sets must not run in parallel (validations interfere, rollback entangles); split even if independent.
+   - **Risk** — concentrate high-risk CUs (large blast radius, low coverage, high business criticality, `seam-extraction`/`security-fix`) into small/singleton waves so a pause/rollback is cheap + attributable. Low-risk mechanical CUs (dependency bumps) pack widely.
+3. **Sequence by strategy** — "decouple before upgrade": seam/abstraction waves precede the upgrades they protect, so risky changes land behind an already-reversible boundary. Honor constraints (≤1 `seam-extraction`/wave).
+4. **Exit criteria** — each wave's `exitCriteria` states what "green" means (all CUs validated, no new arch violations) so the orchestrator gates the next wave.
 
-The guiding rule: **earlier waves de-risk later ones.** Order so that the cheap,
-reversible, low-blast work establishes the seams and version baselines that make
-the expensive, high-blast work safe.
+Guiding rule: **earlier waves de-risk later ones** — cheap, reversible, low-blast work establishes the seams + version baselines that make expensive, high-blast work safe.
 
 ## Graph writes (L4)
-
-Write exactly these node/edge types (node-types.md §L4, edge-types.md §L4):
+Write exactly these types (node-types.md §L4, edge-types.md §L4):
 
 | Element | Type | Mapping |
 |---------|------|---------|
-| ChangeUnit node | `ChangeUnit` | one per IR §2 CU; `props` mirror the IR (`kind`, `strategy`, `equivalence`, `blastRadius`, `status:"PLANNED"`) |
+| ChangeUnit node | `ChangeUnit` | one per IR §2 CU; `props` mirror IR (`kind`, `strategy`, `equivalence`, `blastRadius`, `status:"PLANNED"`) |
 | Wave node | `Wave` | one per IR §3 wave; `props` = `order`, `parallelizable`, `exitCriteria` |
-| Edit target | `TRANSFORMS` | ChangeUnit → {Class,Method,Package,Component} for each `targets[]` GID |
-| Ordering | `PRECEDES` | ChangeUnit → ChangeUnit for each `dependsOn`, with `reason` |
+| Edit target | `TRANSFORMS` | ChangeUnit → {Class,Method,Package,Component} per `targets[]` GID |
+| Ordering | `PRECEDES` | ChangeUnit → ChangeUnit per `dependsOn`, with `reason` |
 | Wave membership | `IN_WAVE` | ChangeUnit → Wave |
-| Debt resolution | `ADDRESSES` | ChangeUnit → DebtItem/Vulnerability for each `debtRefs[]` |
-| Behavior to keep | `PRESERVES` | ChangeUnit → BusinessRule/Capability for each `businessRefs[]` |
-| Seam protection | `GUARDS` | Seam → ChangeUnit for each `seam-extraction` CU it covers |
+| Debt resolution | `ADDRESSES` | ChangeUnit → DebtItem/Vulnerability per `debtRefs[]` |
+| Behavior to keep | `PRESERVES` | ChangeUnit → BusinessRule/Capability per `businessRefs[]` |
+| Seam protection | `GUARDS` | Seam → ChangeUnit per `seam-extraction` CU it covers |
 
-Rules: never mutate L0–L3 nodes (add edges only, schema §4); set
-`provenance.stage="planner"` and the `runId` on every node/edge; on cross-repo
-`TRANSFORMS`, set `props.crossRepo=true` and `props.contract`; promote any
-broadly reusable plan query into `graph/cypher-queries.md`.
+Rules: never mutate L0–L3 (add edges only, schema §4); set `provenance.stage="planner"` + `runId` on every node/edge; on cross-repo `TRANSFORMS` set `props.crossRepo=true` + `props.contract`; promote broadly reusable plan queries into `graph/cypher-queries.md`.
 
 ## Quality / invariants checklist
-
 - IR validates against `modernization-ir.md` §1–§5 and every §7 invariant.
-- The `PRECEDES` graph is acyclic; waves are a valid topological layering.
-- Every CU: non-empty `targets`, a `strategy` with a `fallback`, an
-  `equivalence` level matching its risk, and `rollback` appropriate to its kind.
+- `PRECEDES` acyclic; waves a valid topological layering.
+- Every CU: non-empty `targets`, a `strategy` with `fallback`, an `equivalence` level matching risk, `rollback` appropriate to kind.
 - Every `seam-extraction` CU has a guarding Seam with O(1) rollback.
-- Every behavioral/golden CU has `PRESERVES` links to the rules/capabilities it
-  must not break, and a resolvable validation plan.
+- Every behavioral/golden CU has `PRESERVES` links to the rules/capabilities it must not break + a resolvable validation plan.
 - L4 written with planner provenance; no L0–L3 mutation; cross-repo edges marked.
 - `scope.constraints` fully honored; objective achievable or `NEEDS_HUMAN` raised.
 
 ## Definition of done
-
-The Modernization IR is written to the artifact store and the L4 graph is
-populated such that the orchestrator can execute it wave by wave with no further
-planning: every change is atomic, ordered, traceable to the debt it addresses
-and the behavior it preserves, provable by a stated equivalence plan, and
-reversible — seam extractions in O(1). The plan satisfies the objective within
-all constraints, or the planner has paused with a precise reason it cannot.
+The Modernization IR is written to the artifact store and L4 is populated such that the orchestrator can execute it wave by wave with no further planning: every change is atomic, ordered, traceable to the debt it addresses and the behavior it preserves, provable by a stated equivalence plan, and reversible — seam extractions in O(1). The plan satisfies the objective within all constraints, or the planner has paused with a precise reason it cannot.
