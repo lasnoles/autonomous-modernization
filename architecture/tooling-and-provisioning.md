@@ -45,23 +45,33 @@ The resolution is to split the two concerns:
    wait-for-answer mechanism (`open-question-resolution.md` §5) — never silently
    skip a stage or guess a substitute.
 
-## 3. Preflight — runs before any tool is used
+## 3. Preflight — a hard gate before any exploration
 
-At **INTAKE** (and at the start of any stage that needs tools), the orchestrator
-runs **preflight** against the manifest for the tools that stage `usedBy`:
+Preflight is an **explicit gate between INTAKE and INDEX**, not a best-effort side
+task: the autopilot **does not start exploring/reading source until every required
+tool is installed and verified.** It runs once up front over the full set of tools
+the run will use, and again (idempotently) at the start of any later stage that
+needs tools.
 
 ```
-for each required tool in tooling/manifest.yaml (filtered by stage):
+PREFLIGHT GATE (must pass before INDEX):
+for each REQUIRED tool in tooling/manifest.yaml the run will use:
   1. run `verify`  → present at pinned version? ✅ done.
-  2. else if it has an `image` and a container runtime exists → use the image. ✅
+  2. else if it has an `image` and a container runtime exists → use the image,
+     then `verify` the image. ✅
   3. else install the pinned version via the mechanism that fits THIS host
      (manifest `install:` hints), then re-run `verify`. ✅
-  4. else → raise a Question (blocking) and wait. ⏸
+  4. else → raise a blocking Question and HOLD in the gate. ⏸ (do NOT enter INDEX)
+optional tools (optional: true): attempt the same, but on failure log+defer (don't block)
 record resolved versions + toolchainHash → provenance
+→ enter INDEX only when every required tool passed `verify`.
 ```
 
 Preflight is **idempotent** (a present, correct tool is left alone) and **cached**
-(verified once per environment per run).
+(verified once per environment per run). Because the gate covers the whole run's
+required toolchain up front, a missing tool surfaces *before* any analysis work,
+never midway through a stage. The gate is the contract in
+`architecture/orchestration-state-machine.md` §2 (PREFLIGHT GATE).
 
 ## 4. Two run modes
 

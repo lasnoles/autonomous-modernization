@@ -32,7 +32,8 @@ For each repo, advance the **repo machine**; within EXECUTE, advance the
 **ChangeUnit machine** per CU. Never skip a guard.
 
 ```
-INTAKE → INDEX → RECOVER → DISCOVER → DEBT → PLAN → EXECUTE → COMPLETE
+INTAKE → ⟦PREFLIGHT GATE⟧ → INDEX → RECOVER → DISCOVER → DEBT → PLAN → EXECUTE → COMPLETE
+          (all required tools verified before any exploration)
                                                      └─ per CU: COMPILED →
                                                         VALIDATED → RISK_SCORED →
                                                         APPLY → APPLIED (or PAUSED/
@@ -67,11 +68,32 @@ INTAKE → INDEX → RECOVER → DISCOVER → DEBT → PLAN → EXECUTE → COMP
    the PLAN stage. Honor its `constraints` as hard rules — never plan a change
    that violates them. If a `runId` is given, restore state from the state store
    and continue from each repo/CU's persisted position. Otherwise mint a `runId`
-   and start every repo at INTAKE. **At INTAKE, run tool preflight** against
-   `tooling/manifest.yaml` (verify → prefer container → adapt host install to the
-   environment → re-verify; pinned versions only; unresolved tool → a blocking
-   Question). Record the resolved `toolchainHash` in provenance. See
-   `architecture/tooling-and-provisioning.md`.
+   and start every repo at INTAKE.
+
+1a-inputs. **Mandatory-input gate (at INTAKE, before exploring).** The Target
+   Spec's `inputs:` block has two **required** inputs — `repoScan` (what INDEX
+   scans) and `productionTraces` (the recorded prod traffic that grounds business
+   discovery and E2E equivalence). Validate both before INDEX: `repoScan.source`
+   must resolve (the repos in `scope.repos`, or a prescanned L0 graph), and
+   `productionTraces.source` must exist, parse as its declared `format`, and yield
+   at least `minScenarios` distinct journeys. If either is missing or fails to
+   resolve, **raise a blocking Question and hold the repo at INTAKE** — never
+   explore or discover without them (`open-question-resolution.md` §5). Production
+   traces are not optional discovery fuel here: discovery and INTEGRATE equivalence
+   depend on them, so a run cannot proceed on assumptions in their place.
+
+1a. **Preflight gate — verify all tools BEFORE exploring (hard gate).** After
+   INTAKE and *before* INDEX (the first stage that reads/explores source), run tool
+   preflight against `tooling/manifest.yaml` for **every required tool the run will
+   use** (verify → prefer container → adapt host install to the environment →
+   re-verify; pinned versions only). Do **not** enter INDEX until every required
+   (non-optional) tool passes `verify` at its pinned version — exploration must
+   never start on a partial toolchain. Optional tools may be deferred, but log
+   their absence. Any unresolved required tool → raise a **blocking Question** and
+   hold the repo in the gate (`open-question-resolution.md` §5); resume only once
+   it verifies. Record the resolved `toolchainHash` in provenance. See
+   `architecture/tooling-and-provisioning.md` §3 and the PREFLIGHT gate in
+   `architecture/orchestration-state-machine.md` §2.
 
 2. **Advance analysis stages (once per repo).** For INDEX→PLAN, invoke the
    mapped skill, wait for `status=ok`, verify the expected graph layer was

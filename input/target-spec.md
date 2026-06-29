@@ -24,6 +24,19 @@ run:
   owner: min_than_zaw@msi-global.com.sg
   environment: staged                          # dry-run | shadow | staged | prod-rollout
 
+inputs:                                        # MANDATORY run inputs — INTAKE blocks the run
+                                               # (raises a Question, never explores) if either is missing.
+  repoScan:                                    # REQUIRED — what INDEX scans/explores
+    mode: full-clone                           # full-clone | snapshot | prescanned-graph
+    source: "git@…/billing-svc.git#<commit-sha>"   # must resolve to the repos in scope.repos
+    # mode: prescanned-graph → source: "path/to/L0-graph.ndjson" (skip re-scan, reuse an INDEX export)
+  productionTraces:                            # REQUIRED — recorded prod traffic that grounds
+                                               # business discovery + E2E equivalence (tester/replay)
+    source: "s3://traces/billing-svc/2026-06/" # where captured req/resp + emitted events live
+    format: har                                # har | otel | jsonl-reqresp | custom
+    window: "2026-06-01..2026-06-28"           # capture window the traces cover
+    minScenarios: 20                           # gate: ≥ this many distinct journeys, else block
+
 scope:
   repos:                                       # repos in scope + their role
     - { name: billing-svc, role: primary, vcsUrl: "git@…/billing-svc.git", defaultBranch: main }
@@ -192,6 +205,7 @@ acceptance:                                    # run-level definition of done
 
 | Section | Consumed by | Becomes |
 |---------|-------------|---------|
+| §1 `inputs` (mandatory) | orchestrator (INTAKE), semantic-indexer, business-discovery, tester/replay | the source INDEX scans + the prod traces that ground discovery & E2E equivalence; **missing either blocks the run** |
 | §1 run config | orchestrator / workflows | run config + IR `scope`/`gates` |
 | §2 design intent | architect, planner | target end-state, seam placement |
 | §3 preserve list | planner, validation, risk | `PRESERVES` edges, equivalence checks |
