@@ -85,6 +85,27 @@ environments, planner waves/seams, risk gating, OKF wiki, resume/batching —
 is reused unchanged, because it operates on behavior at the interface, not on
 Python syntax.
 
+### 3.3 `go` (primarily a PORT TARGET)
+Go is the reference **target** for cross-language ports (Java→Go, Python→Go). As
+a target it binds:
+
+| Field | Binding |
+|---|---|
+| `recipeEngine` | **none for same-language** (Go modernization is rare here); ports use the **`generate`** strategy, not AST recipes |
+| `targetIdiomProfile` | **`recipes/port/go/profile.yaml`** — module layout, error/nullability/DI/concurrency idioms, source-lib→Go mappings, scaffold files |
+| `buildSystems` | go modules (`go.mod`) |
+| `build` / `test.runner` | `go build ./...` / `go test ./... -race -cover` (test + coverage are built into the toolchain) |
+| `test.coverage` | `go test -coverprofile` + `go tool cover` |
+| `scanners.vuln` | **govulncheck** |
+| `scanners.security`/`smell` | **staticcheck** |
+| `formatter` | **gofmt + goimports** |
+| `indexer.*` (only if Go is also a *source*) | tree-sitter-go + go/packages+go/types; chi/net-http & gRPC entry points; pgx/sqlc/GORM data access |
+
+So `target.language: go` routes PLAN to emit `language-port` CUs, the compiler's
+`generate` rung to read `recipes/port/go/`, and validation/devops to build, test,
+scan, and stand up the generated Go service under Podman — proven black-box
+against the frozen interface (`multi-language-and-porting.md`).
+
 ## 4. Adding a new language profile
 
 1. Add the language's row to the table in §2 (bind every field).
@@ -103,5 +124,6 @@ Python syntax.
 - `source.language != target.language` → **port** (`language-port` CU,
   `strategy: generate`): index the source with the *source* profile, generate the
   target with the *target* profile's `targetIdiomProfile`, prove equivalence
-  black-box (`multi-language-and-porting.md`). E.g. `source: python`,
-  `target: go`.
+  black-box (`multi-language-and-porting.md`). E.g. **`source: java, target: go`**
+  or **`source: python, target: go`** → both read `recipes/port/go/profile.yaml`,
+  build/test with the `go` toolchain, and cut over behind an `http-proxy` seam.
