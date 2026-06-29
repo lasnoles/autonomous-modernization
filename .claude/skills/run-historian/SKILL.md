@@ -12,16 +12,17 @@ description: >-
 
 # Run Historian — OKF wiki + live monitor
 
-You turn the orchestrator's event stream into a browsable, auditable **OKF
-bundle** (`architecture/okf-run-wiki.md`) that is simultaneously the **live
-monitor** (`architecture/run-state-observability.md` §4). There is no separate
-reporting step: the record is written as the run happens, so it always matches
-what actually happened.
+You fold the orchestrator's event stream into a browsable, auditable **OKF bundle**
+(`architecture/okf-run-wiki.md`) that is simultaneously the **live monitor**
+(`architecture/run-state-observability.md` §4). No separate reporting step — the
+record is written as the run happens, so it always matches what actually happened.
 
-Read these contracts first:
-- `architecture/okf-run-wiki.md` — bundle layout, frontmatter, `log.md` = state machine
-- `architecture/run-state-observability.md` — events, checkpoints, tokens, monitoring
-- `architecture/orchestration-state-machine.md` §4 — event schema (incl. `tokens`)
+Read first: `architecture/okf-run-wiki.md` (bundle layout, frontmatter, `log.md` =
+state machine) · `architecture/run-state-observability.md` (events, checkpoints,
+tokens, monitoring) · `architecture/orchestration-state-machine.md` §4 (event
+schema, incl. `tokens`).
+
+**One transition = one event = one checkpoint = one wiki update.**
 
 ## When to use
 
@@ -31,10 +32,10 @@ Read these contracts first:
 
 ## Inputs / Outputs
 
-- **Input:** the event stream / latest events, the current checkpoint, and the
-  semantic graph (for `gid` back-links and concept detail).
-- **Output:** the OKF bundle under `wiki/<runId>/` (see layout below), plus
-  `status.json` (machine) and `STATUS.md` (= the bundle's `index.md`).
+- **In:** the event stream / latest events · the current checkpoint · the semantic
+  graph (for `gid` back-links and concept detail).
+- **Out:** the OKF bundle under `wiki/<runId>/` (layout below) + `status.json`
+  (machine) + `STATUS.md` (= the bundle's `index.md`).
 
 ## Bundle it maintains
 
@@ -48,39 +49,45 @@ wiki/<runId>/
 
 ## Procedure (per event)
 
-1. **Append to `log.md`** — one immutable line per transition: timestamp, scope
-   (repo/CU), `from→to`, guard/result, artifacts, **tokens**, and a link to the
-   concept page. Never rewrite prior lines (it's the audit trail).
-2. **Update the concept page** the event is about — create/refresh the file at
-   its identity path (e.g. `change-units/CU-014.md`, `stages/INDEX.md`,
-   `gaps/GAP-007.md`). Set required `type` frontmatter; set `gid` to the graph
-   node; set `status`, `tokens`, `tags`, and `links` to related pages.
-3. **Cross-link, don't duplicate** — link a ChangeUnit to the flows it touches,
-   the gaps it depends on, and the decision that gated it; link a flow to its
-   entry point. Links are the traversal graph.
-4. **Refresh `index.md`** (= `STATUS.md`): the live tree — per-repo stage,
-   wave/CU progress, token rollup, open gaps, anything PAUSED/BLOCKED. This is
-   the human front door and the monitor view.
-5. **Rewrite `status.json`**: the machine-readable mirror of the checkpoint
-   (current stage per repo/CU, %complete, current skill, tokens) for watchers/CI.
-6. **Fold tokens into `tokens.md`**: rollup at step → CU → stage → repo → run
-   with model + cost estimate.
+```
+1. APPEND log.md — one immutable line/transition: timestamp, scope (repo/CU),
+   from→to, guard/result, artifacts, tokens, link to the concept page.
+   Never rewrite prior lines (it's the audit trail).
+
+2. UPDATE the concept page the event is about — create/refresh at its identity
+   path (e.g. change-units/CU-014.md, stages/INDEX.md, gaps/GAP-007.md).
+   Set frontmatter: required `type`; `gid` → graph node; `status`, `tokens`,
+   `tags`, `links` to related pages.
+
+3. CROSS-LINK, don't duplicate — CU → flows it touches, gaps it depends on,
+   decision that gated it; flow → its entry point. Links are the traversal graph.
+
+4. REFRESH index.md (= STATUS.md) — the live tree: per-repo stage, wave/CU
+   progress, token rollup, open gaps, anything PAUSED/BLOCKED. Human front door
+   + monitor view.
+
+5. REWRITE status.json — machine-readable mirror of the checkpoint (stage per
+   repo/CU, %complete, current skill, tokens) for watchers/CI.
+
+6. FOLD tokens into tokens.md — rollup step → CU → stage → repo → run, with
+   model + cost estimate.
+```
 
 ## Stage-specific pages it must produce
 
-- `entry-points/index.md` — the **full entry-point inventory** by class (proves
-  "no single front door" was honored), each linking to its flow(s).
-- `flows/index.md` — every explored flow + coverage; flag entry points with no
-  flow as gaps.
+- `entry-points/index.md` — full entry-point inventory by class (proves "no single
+  front door" was honored), each linking to its flow(s).
+- `flows/index.md` — every explored flow + coverage; flag entry points with no flow
+  as gaps.
 - `key-results/index.md` — Target Spec acceptance criteria as KRs with live ✔/✖.
 - `decisions/index.md` — every gate decision (auto/pause/block) with rationale.
 - `gaps/index.md` — gaps & assumptions register with `whatWouldResolveIt`.
 - `questions/index.md` + `questions/Q-*.md` — **open questions the run is waiting
-  on** (prompt, options, what it blocks, and the one-line way to answer), plus
-  answered ones. Mirror open questions into `STATUS.md`/`status.json` **at the
-  top** the instant they're raised, and append `ASK`/`ANSWER` lines to `log.md`
-  (`architecture/open-question-resolution.md` §5). This is how a human sees what
-  to answer and the run shows it is waiting.
+  on** (prompt, options, what it blocks, the one-line way to answer), plus answered
+  ones. Mirror open questions into `STATUS.md`/`status.json` **at the top** the
+  instant they're raised, and append `ASK`/`ANSWER` lines to `log.md`
+  (`architecture/open-question-resolution.md` §5). This is how a human sees what to
+  answer and the run shows it is waiting.
 
 ## Finalization (at COMPLETE)
 
@@ -88,8 +95,8 @@ wiki/<runId>/
 - Ensure every concept page exists and back-links resolve (no dangling links).
 - Write run totals to `tokens.md`; link the E2E report, environment manifest, and
   audit manifest.
-- The bundle is plain Markdown with stable paths → drops into GitBook/any
-  OKF-aware tool and diffs cleanly in git.
+- Plain Markdown with stable paths → drops into GitBook/any OKF-aware tool and diffs
+  cleanly in git.
 
 ## Quality / invariants
 
@@ -103,7 +110,7 @@ wiki/<runId>/
 
 ## Definition of done
 
-A traversable OKF bundle whose `index.md` shows current/final status, whose
-`log.md` is the complete transition+token history, and from which a reader can
-reach — by following links — exactly what happened at every stage, every
-ChangeUnit, every gap and decision, and what each step cost.
+A traversable OKF bundle whose `index.md` shows current/final status, whose `log.md`
+is the complete transition+token history, and from which a reader can reach — by
+following links — exactly what happened at every stage, every ChangeUnit, every gap
+and decision, and what each step cost.
