@@ -30,9 +30,46 @@ questions" (§6). This doc generalizes that into a uniform retrieval discipline.
 5. **Declare a read budget.** Each stage runs under a `maxSpans` / `maxBytes`
    budget (run config). Exceeding it is a signal to *subdivide* the work (per
    component/flow), not to slurp more — and it's logged (no silent truncation).
+6. **Never materialize a whole result set in context.** Any list a stage works
+   over — resolved dependencies, scanner findings, query result rows, files in a
+   module, AST declarations, entry points — is processed in **bounded batches**,
+   not read all-at-once. This is the rule that keeps a large multi-repo run from
+   blowing the context window mid-stage. See §1a.
 
-A skill that wants to "just read the file" is doing it wrong: it asks the graph
-which spans matter and reads those.
+### 1a. The batching loop (binds every stage that scans/enumerates)
+
+A stage that enumerates N items (deps, findings, classes, files, rows) MUST NOT
+pull all N into context. It pages through them:
+
+```
+for each batch of `batchSize` items (default 25; from run config `execution.batchSize`):
+  read only this batch (respect maxConcurrentReads — default 4 files/queries in flight)
+  process it
+  1. WRITE results to the graph / artifact store in the run folder (durable, fsync'd) — not context
+  2. THEN checkpoint the batch cursor (last item done) + emit an event   ← write-ahead: results before cursor
+  RELEASE the batch from context (drop the rows/spans) before the next batch
+```
+
+The two-step order matters: results are flushed to disk **before** the cursor
+advances, so a session that dies mid-stage loses at most the last in-flight batch
+and resumes at the next one — never re-scans the whole stage. This is the
+mid-stage resume contract in `architecture/run-state-observability.md` §2.5.
+
+Consequences that every skill relies on:
+- **Output goes to the graph/artifact store immediately**, never accumulated in
+  context to be written "at the end." Context holds at most one batch.
+- **Cursor + checkpoint per batch** means a stage is resumable mid-scan: a
+  timeout or kill resumes at the next un-processed batch, not from scratch.
+- **Paginate every query.** Graph reads use `SKIP`/`LIMIT` (or stream the NDJSON)
+  so a 50k-class repo is read in pages, never as one result.
+- **Order batches by the coarsest partition first** (per module, then per
+  package/component) so each batch is a coherent, independently-checkpointable
+  unit of work.
+- **Budget overrun ⇒ smaller batches / subdivide**, never a bigger read; log it.
+
+A skill that wants to "just read the file" — or "load all the X" — is doing it
+wrong: it asks the graph which spans matter, reads one bounded batch, writes the
+result out, drops it, and moves on.
 
 ## 2. Indexing at scale — shard, parallelize, incrementalize
 

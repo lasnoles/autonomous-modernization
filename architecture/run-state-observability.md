@@ -29,6 +29,11 @@ position, status, input hashes, artifacts, and **token usage**.
     "billing-svc": {
       "stage": "EXECUTE",              // current repo-machine state
       "stagesDone": ["INTAKE","INDEX","RECOVER","DISCOVER","DEBT","PLAN"],
+      "batchCursor": {                 // mid-stage resume point (see §2.5); null between stages
+        "stage": "DEBT", "partition": "module:payments-core",
+        "batch": 7, "lastItem": "billing-svc::Dependency::org.apache.commons:commons-lang3:3.9",
+        "itemsDone": 174, "artifact": "artifacts/DEBT/l3.partial.ndjson"
+      },
       "changeUnits": {
         "CU-014": { "state": "APPLIED",   "tokens": { "in": 38120, "out": 9044, "total": 47164 } },
         "CU-021": { "state": "PAUSED",    "reason": "requireHumanFor:seam-extraction",
@@ -59,10 +64,36 @@ On (re)start with a `runId`:
    when input hashes are unchanged (`semantic-graph-schema.md` §5) — no
    recomputation, no double-apply.
 3. In-flight steps (started, not committed) are **re-run from their last
-   checkpoint**, never resumed mid-step. APPLY uses idempotency keys (branch/PR
+   checkpoint** — for a batched analysis stage that is its **`batchCursor`**, not
+   the start of the stage (§2.5); for an APPLY it is idempotency keys (branch/PR
    per CU) so a retried apply doesn't create duplicates.
 4. Continue the state machine. Token counters resume from the checkpoint and
    keep accumulating (so the rollup spans the whole run, across restarts).
+
+## 2.5 Mid-stage resume — batch results persist to the run folder
+
+A long scanning stage (INDEX/RECOVER/DISCOVER/DEBT/PLAN) does **not** hold its
+output in context to write at the end — it pages its inputs in batches
+(`scalability-and-retrieval.md` §1a) and persists as it goes, so a dead session
+resumes from the last finished batch rather than re-scanning the repo:
+
+1. **Results are written to disk per batch, before the cursor advances**
+   (write-ahead order): each batch appends its nodes/edges to the run folder's
+   graph store (portable `nodes.ndjson`/`edges.ndjson` shards, or Bolt commit) and
+   any report to `artifacts/<stage>/…`. This is durable, fsync'd output — not
+   context.
+2. **Then `batchCursor` is checkpointed** (atomic write + fsync) recording the
+   partition, batch index, `lastItem`, and the partial artifact. Because results
+   are flushed *before* the cursor moves, a crash between the two leaves at most
+   the last batch to redo — and redoing it is safe (idempotent, hash-gated: §2.2).
+3. **On restart**, the stage reads its `batchCursor` and continues at the next
+   un-processed batch; already-written batches are skipped because their
+   source-span hashes are unchanged (`semantic-graph-schema.md` §5). Worst-case
+   lost work is one in-flight batch, never the whole stage.
+
+So the run folder (`<runId>/`: the graph NDJSON shards, `artifacts/`,
+`checkpoint.json`, event log) **is** the resume memory. Kill the session at batch
+174 of a 10k-dependency scan and `--resume <runId>` picks up at batch 175.
 
 A run can be killed at any point and resumed with `--resume <runId>` with no data
 loss and no duplicated side effects.

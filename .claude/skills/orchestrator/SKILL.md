@@ -239,6 +239,31 @@ appear in the status file and the run report with how to resolve them.
 - Serialize CUs that touch the same cross-repo contract via the contract lock;
   re-validate dependents after the lock holder applies.
 
+## Context hygiene — keep each stage inside the window (large-estate rule)
+
+The timeouts that kill big multi-repo runs come from holding too much at once.
+Enforce these, honoring `execution.*` from the run config
+(`architecture/scalability-and-retrieval.md` §1a):
+
+- **Dispatch each stage/CU as its own bounded subagent.** Hand it only its
+  contracts + its scoped subgraph + the spans it fetches. **Keep only the
+  structured result** it returns (status, counts, artifact paths, the cursor) —
+  never fold a stage's raw reads (file contents, scanner reports, query rows) into
+  the orchestrator's own context.
+- **Flush between stages and between CUs.** When `flushBetweenStages` is set, drop
+  the prior stage's scoped subgraph/spans from context before starting the next;
+  the next stage re-queries the graph for exactly what it needs. The graph and
+  artifact store are the memory — context is scratch.
+- **Batch the work, don't widen it.** Each stage pages its inputs in
+  `batchSize` chunks with `maxConcurrentReads` in flight and checkpoints a cursor
+  per batch. A stage that overruns its `maxSpans`/`maxBytes` budget **subdivides**
+  (per module/component/flow) — never reads more. Process repos/modules in
+  bounded waves rather than fanning out every repo's analysis into one context.
+- **Resume mid-stage, not just mid-pipeline.** Because each batch checkpoints its
+  cursor, a timed-out or killed stage resumes at the next un-processed batch with
+  no recompute (state-machine §5) — so a large scan makes monotonic progress
+  across restarts instead of restarting from zero.
+
 ## Failure & recovery (summary — full table in state-machine §7)
 
 | Situation | Orchestrator action |

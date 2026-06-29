@@ -70,10 +70,14 @@ ChangeUnit `props` mirror the IR 1:1 (node-types.md §L4).
    "no behavior change to public API" → every CU touching `isPublicApi:true`
    classes gets `equivalence.level ≥ behavioral`).
 
-2. **Derive candidate changes from debt + objective.** Enumerate the work:
+2. **Derive candidate changes from debt + objective.** Enumerate the work
+   **per component, paging the ranked backlog in `execution.batchSize` batches**
+   (`architecture/scalability-and-retrieval.md` §1a) — emit ChangeUnits for each
+   batch and persist them before reading the next, rather than loading the whole
+   L3 backlog into context:
    - From **L3**: each open `DebtItem`/`Vulnerability` in scope becomes a
      candidate change, linked later via `ADDRESSES`
-     (cypher: "Open debt within a component, ranked";
+     (cypher: "Open debt within a component, ranked" — use its `SKIP`/`LIMIT`;
      "Deprecated-API usage to migrate").
    - From the **objective**: framework/language migrations and the requested
      seam extractions, even where no DebtItem exists.

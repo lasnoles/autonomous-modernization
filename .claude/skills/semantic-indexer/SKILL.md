@@ -67,6 +67,17 @@ envelope (type, from, to, props, provenance). Resolved facts get
 
 ## Procedure
 
+> **Index in bounded batches — never hold a repo (or its dependency set) in
+> context.** This is the hard rule for large multi-repo runs
+> (`architecture/scalability-and-retrieval.md` §1a). Process **one module at a
+> time**, and within a module page through declarations and dependencies in
+> batches of `execution.batchSize` (default 25), respecting `maxConcurrentReads`
+> (default 4 files in flight). **Write each batch's nodes/edges straight to the
+> graph/NDJSON and drop it from context** before the next batch; checkpoint a
+> cursor (`module`, `lastDeclaration`) per batch so a timeout resumes mid-repo
+> instead of restarting. Never accumulate nodes in memory to "write at the end,"
+> and never read whole files except this stage's one streaming pass per file.
+
 1. **Detect the build system.** Scan the worktree root and subdirectories for
    `pom.xml` (Maven), `build.gradle[.kts]` / `settings.gradle` (Gradle), or fall
    back to a source-tree heuristic if none. Determine the module reactor /
@@ -77,11 +88,12 @@ envelope (type, from, to, props, provenance). Resolved facts get
 2. **Resolve the classpath & dependencies.** Use the build tool itself
    (`mvn dependency:list -DoutputType=…` / `mvn dependency:build-classpath`,
    `gradle dependencies` / `:dependencies` resolution) to get the *exact*
-   resolved graph — do not parse coordinates by hand. For each resolved
-   artifact emit a **`Dependency`** node (`coordinates`, `version`, `scope`,
-   `direct`) and a **`DEPENDS_ON_LIB`** edge `Module → Dependency`
-   (`props.scope`, `props.direct`). The resolved classpath jars feed the
-   bytecode resolver in step 3.
+   resolved graph — do not parse coordinates by hand. **Stream the resolved
+   artifact list in batches** (`execution.batchSize`): for each batch emit its
+   **`Dependency`** nodes (`coordinates`, `version`, `scope`, `direct`) and
+   **`DEPENDS_ON_LIB`** edges `Module → Dependency`, write them out, then drop the
+   batch — do not hold the full (often thousands-deep transitive) dependency set
+   in context. The resolved classpath jars feed the bytecode resolver in step 3.
 
 3. **Parse to ASTs + resolve symbols/types.** Recommended stack, in order of
    precision:
@@ -104,7 +116,10 @@ envelope (type, from, to, props, provenance). Resolved facts get
    for every edge in step 6 and is what makes call/override resolution
    deterministic rather than textual.
 
-5. **Emit structural nodes (containment first).** Walk the symbol table and emit:
+5. **Emit structural nodes (containment first), one batch at a time.** Walk the
+   symbol table **in batches of `execution.batchSize` declarations**, writing each
+   batch's nodes/edges to the graph and releasing it before the next (do not buffer
+   the whole module's nodes). Emit:
    - **`Package`** (`classCount`), **`Class`** (`classKind`, `modifiers[]`,
      `isPublicApi`, `annotations[]`), **`Method`** (`signature`, `returnType`,
      `params[]`, `modifiers[]`, `cyclomatic`, `annotations[]`, `isEntryPoint`),
