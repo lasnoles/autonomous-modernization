@@ -14,45 +14,38 @@ description: >-
 
 # Architecture Recovery — L1 Reconstruction
 
-You are the **cartographer**. The indexer told us what the code *is* (L0:
-Classes, Methods, calls, reads/writes); you decide how it's *organized* and
-where it can be safely cut. You read structure and write the architectural
-layer (L1) on top of it. You **never** modify L0 nodes — every output is an
-additive L1 node, edge, or annotation, so a re-index can invalidate and
-recompute you cleanly (semantic-graph-schema §5).
+You are the **cartographer**: read L0 structure (Classes, Methods, calls,
+reads/writes), write the L1 architectural layer on top. Output is **always
+additive** L1 (node/edge/annotation) — **never** mutate L0, so a re-index can
+invalidate and recompute you cleanly (semantic-graph-schema §5).
 
-Read these contracts before acting and treat them as authoritative:
-
+Authoritative contracts — read before acting:
 - `architecture/semantic-graph-schema.md` — GID format, envelopes, layered fact model, provenance/confidence
-- `graph/ontology.md` — invariants enforced on write (esp. §3)
+- `graph/ontology.md` — write invariants (esp. §3)
 - `graph/node-types.md` — L1 `Component`, `Layer`, `Seam` props
 - `graph/edge-types.md` — L1 `BELONGS_TO`, `DEPENDS_ON`, `LAYERED_AS`, `VIOLATES`, `CANDIDATE_SEAM`
-- `graph/cypher-queries.md` — reusable reads (you add new L1 queries here)
+- `graph/cypher-queries.md` — reusable reads (add new L1 queries here)
+- `architecture/scalability-and-retrieval.md` §1a — batching / bounded-context retrieval
 
 ## When to use
+- Orchestrator advances a repo INDEX → RECOVER.
+- "Recover architecture / components / layers / seams for repo X" or "where could a strangler-fig boundary go?"
+- Re-run after a re-index invalidated L0 (incremental: recompute only affected components).
 
-- The orchestrator advances a repo from INDEX to RECOVER (state machine).
-- "Recover the architecture / components / layers / seams for repo X."
-- "Where could we put a strangler-fig boundary in this codebase?"
-- Re-run after a re-index invalidated L0 nodes (incremental: recompute only
-  the affected components, not the whole graph).
-
-Do **not** use it to parse source (query L0 instead), to infer business
-meaning (that's L2 `business-discovery`), or to score debt/risk (L3/L5).
+Do **not** use to parse source (query L0 instead), infer business meaning (L2
+`business-discovery`), or score debt/risk (L3/L5).
 
 ## Inputs / Outputs
 
-**Inputs (read-only):**
+**In (read-only, via cypher — never re-parse source):**
+- L0 structural graph for the repo: `Class`, `Method`, `Field`, `Package`,
+  `Module`, `Endpoint`, `Table` nodes; `CALLS`, `EXTENDS`, `IMPLEMENTS`,
+  `READS`, `WRITES`, `DECLARES`, `HANDLED_BY`, `DEPENDS_ON_LIB` edges.
+- Class `props.annotations[]` (`@RestController`, `@Service`, `@Repository`,
+  `@Entity`) and `Package` names as layer/cluster priors.
+- Optional run config: expected layer DAG + per-repo overrides.
 
-- The **L0 structural graph** for the repo: `Class`, `Method`, `Field`,
-  `Package`, `Module`, `Endpoint`, `Table` nodes and `CALLS`, `EXTENDS`,
-  `IMPLEMENTS`, `READS`, `WRITES`, `DECLARES`, `HANDLED_BY`, `DEPENDS_ON_LIB`
-  edges. Pulled via cypher — **never** by re-parsing source.
-- Class `props.annotations[]` (e.g. `@RestController`, `@Service`,
-  `@Repository`, `@Entity`) and `Package` names as layer/cluster priors.
-- Optional run config: the expected layer DAG and any per-repo overrides.
-
-**Outputs (additive L1 only):**
+**Out (additive L1 only):**
 
 | New node | When |
 |----------|------|
@@ -64,153 +57,116 @@ meaning (that's L2 `business-discovery`), or to score debt/risk (L3/L5).
 |----------|-----------|---------|
 | `BELONGS_TO` | Class → Component, Class → Layer | recovered grouping (`confidence`) |
 | `DEPENDS_ON` | Component → Component | inter-component coupling (`weight` = call count) |
-| `LAYERED_AS` | Component → Layer | component's layer assignment |
+| `LAYERED_AS` | Component → Layer | layer assignment |
 | `VIOLATES` | Component/Class → Layer | layering rule broken (`rule`) |
 | `CANDIDATE_SEAM` | Seam → Component | seam attaches at this boundary (`extractability`) |
 
 Every node/edge carries the common envelope with `provenance.stage =
-"architecture-recovery"` and `provenance.runId`; recovered (inferred)
-groupings set `confidence < 1.0` per ontology §3.
+"architecture-recovery"` + `provenance.runId`; inferred groupings set
+`confidence < 1.0` per ontology §3.
 
 ## Procedure
 
-1. **Pull the structural graph — per module, paged, not the whole repo.** Load the
-   L0 projection with cypher (see *Example reads*) **one `Module` at a time**, and
-   within a module page `Class` nodes with `SKIP`/`LIMIT` in batches of
-   `execution.batchSize` (`architecture/scalability-and-retrieval.md` §1a): each
-   class's `package`, `annotations[]`, `isPublicApi`; the method-level `CALLS`
-   graph lifted to class granularity; `EXTENDS`/`IMPLEMENTS`; `READS`/`WRITES` to
-   `Field`/`Table`. **Do not load "all Class nodes" at once** — that is the bulk
-   read that times out large repos. Hold only the current module's projection
-   (plus the cross-module `DEPENDS_ON` weight tallies, which are small aggregates,
-   not node lists). Do not parse source. If a node's source `hash` is unchanged
-   since the last run, reuse its prior cluster assignment (incremental).
+```
+1. PULL — per module, paged; never "all Class nodes" at once (that bulk read times out large repos).
+   For each Module (one at a time), page Class with SKIP/LIMIT in batches of
+   execution.batchSize (scalability-and-retrieval.md §1a). Per class: package,
+   annotations[], isPublicApi; method CALLS lifted to class granularity;
+   EXTENDS/IMPLEMENTS; READS/WRITES → Field/Table.
+   Hold only current module's projection + small cross-module DEPENDS_ON weight tallies.
+   Incremental: if a node's source hash is unchanged since last run, reuse its prior cluster.
 
-2. **Build the class dependency graph.** Project method `CALLS` onto an
-   undirected (for clustering) and a directed (for layering/weights) class
-   graph. Edge weight = number of distinct call sites between the two classes
-   plus inheritance/impl and shared `Table`/`Field` access. Keep the directed
-   version for `DEPENDS_ON` weights and violation detection.
+2. BUILD class dependency graph — project method CALLS onto undirected (clustering)
+   + directed (layering/weights) class graphs. Edge weight = distinct call sites
+   between classes + inheritance/impl + shared Table/Field access. Keep directed
+   version for DEPENDS_ON weights and violation detection.
 
-3. **Compute coupling/cohesion metrics** per class and per candidate cluster:
-   - **Afferent coupling (Ca):** distinct classes that call into it.
-   - **Efferent coupling (Ce):** distinct classes it calls out to.
-   - **Instability** `I = Ce / (Ca + Ce)` (0 = stable, 1 = unstable).
-   - **Relational cohesion (LCOM-style):** internal-edge density of the
-     cluster vs. edges crossing its boundary; high internal / low crossing
-     is what we want a Component to maximize.
+3. METRICS per class + candidate cluster:
+   • Ca (afferent) = distinct classes calling in.  • Ce (efferent) = distinct classes called out.
+   • Instability I = Ce/(Ca+Ce)  (0 stable … 1 unstable).
+   • Relational cohesion (LCOM-style) = internal-edge density vs. boundary-crossing edges;
+     maximize internal / minimize crossing.
 
-4. **Cluster classes into Components.** Combine signals, don't trust one:
-   - **Community detection** on the weighted class graph (Louvain/Leiden,
-     maximizing modularity) is the primary signal — it finds groups that
-     call each other far more than they call outside.
-   - **Package-structure prior:** classes sharing a package prefix lean
-     toward the same component (regularize the modularity result toward it;
-     it usually encodes the original author's intent).
-   - **Naming prior:** suffix/role conventions (`*Controller`, `*Service`,
-     `*Repository`, `*Dao`, `*Client`, `*Mapper`) bias both clustering and
-     layer inference.
-   - Each cluster becomes one `Component`. Set `cohesion` (internal density),
-     `coupling` (boundary-crossing edge mass), `size` (class count), and a
-     short `responsibility` summarizing its dominant role/package.
+4. CLUSTER into Components — combine signals, don't trust one:
+   • Community detection (Louvain/Leiden, maximize modularity) = primary signal.
+   • Package-structure prior — shared package prefix → same component (regularize toward it).
+   • Naming prior — *Controller/*Service/*Repository/*Dao/*Client/*Mapper bias cluster + layer.
+   Each cluster → one Component; set cohesion (internal density), coupling
+   (boundary-crossing mass), size (class count), responsibility (dominant role/package).
 
-5. **Infer layers.** Assign each Component a `Layer ∈ {web, service, domain,
-   persistence, integration}` from converging evidence:
-   - **Annotations** (strongest): `@RestController`/`@Controller` → web,
-     `@Service` → service, `@Repository`/JPA/JDBC usage → persistence,
-     `@Entity`/POJO domain types → domain, HTTP/AMQP/Kafka clients →
-     integration.
-   - **Endpoint adjacency:** components reachable directly from `Endpoint`
-     `HANDLED_BY` are web/edge.
-   - **Table adjacency:** components with `WRITES`/`READS` to `Table` are
-     persistence.
-   - **Dependency direction:** layers flow one way; sinks (high Ca, low Ce)
-     trend toward domain/persistence, sources toward web.
-   Emit `LAYERED_AS` (Component → Layer) and per-class `BELONGS_TO` (→ Layer);
-   set `confidence` lower where signals disagree.
+5. INFER layers — Component → Layer ∈ {web, service, domain, persistence, integration}
+   from converging evidence:
+   • Annotations (strongest): @RestController/@Controller→web, @Service→service,
+     @Repository/JPA/JDBC→persistence, @Entity/POJO→domain, HTTP/AMQP/Kafka clients→integration.
+   • Endpoint adjacency: reachable from Endpoint HANDLED_BY → web/edge.
+   • Table adjacency: WRITES/READS to Table → persistence.
+   • Dependency direction: sinks (high Ca, low Ce) → domain/persistence; sources → web.
+   Emit LAYERED_AS (Component→Layer) + per-class BELONGS_TO (→Layer); lower confidence where signals disagree.
 
-6. **Detect layering violations.** Define the expected layer DAG (default:
-   `web → service → domain → persistence`, `integration` callable from
-   service/persistence). For every `DEPENDS_ON` (or class-level call) that
-   goes **against** the allowed direction — e.g. persistence → web, domain →
-   service, or a skip-layer call — emit a `VIOLATES` (Component/Class → Layer)
-   with `rule` naming the broken constraint (e.g. `"persistence→web"`,
-   `"skip-layer:web→persistence"`, `"upward-dependency"`).
+6. DETECT violations — expected layer DAG (default web→service→domain→persistence;
+   integration callable from service/persistence). Any DEPENDS_ON / class call against
+   allowed direction (e.g. persistence→web, domain→service, skip-layer) → emit VIOLATES
+   (Component/Class→Layer) with rule naming the broken constraint
+   (e.g. "persistence→web", "skip-layer:web→persistence", "upward-dependency").
 
-7. **Score seam extractability.** For each candidate boundary (typically a
-   Component boundary, or a sub-cluster the modularity step nearly split),
-   compute an `extractability ∈ [0,1]` — *how cleanly this can be carved out
-   behind a strangler-fig shim*. Higher is easier (see *Seam extractability*
-   below). Above a threshold, emit a `Seam` with the most plausible
-   `seamKind` and the `boundaryClasses[]` that form the cut, plus a
-   `CANDIDATE_SEAM` edge to the Component(s) it fences.
+7. SCORE seams — for each candidate boundary (a Component boundary, or a sub-cluster
+   modularity nearly split), compute extractability ∈ [0,1] (see below). Above threshold,
+   emit a Seam with most plausible seamKind + boundaryClasses[] forming the cut,
+   plus a CANDIDATE_SEAM edge to the Component(s) it fences.
 
-8. **Emit L1 with provenance/confidence.** Write all nodes/edges additively
-   with `provenance.stage="architecture-recovery"`, `runId`, and `tool`
-   (clusterer + version). Inferred groupings/layers carry `confidence < 1.0`;
-   resolved structural aggregations (e.g. a `DEPENDS_ON` weight summed from
-   resolved `CALLS`) may carry higher confidence. Never touch L0 nodes.
+8. EMIT L1 — write all additively with provenance.stage="architecture-recovery", runId,
+   tool (clusterer + version). Inferred groupings/layers confidence < 1.0; resolved
+   structural aggregations (e.g. DEPENDS_ON weight summed from resolved CALLS) may be higher.
+   Never touch L0.
+```
 
 ## Example reads (from `graph/cypher-queries.md` + L1 additions)
 
-**Lift the method call graph to class granularity (clustering + DEPENDS_ON weights):**
-
+**Lift method call graph to class granularity (clustering + DEPENDS_ON weights):**
 ```cypher
 MATCH (a:Class)-[:DECLARES]->(:Method)-[c:CALLS]->(:Method)<-[:DECLARES]-(b:Class)
 WHERE a.repo = $repo AND b.repo = $repo AND a <> b
 RETURN a.gid AS from, b.gid AS to, count(c) AS weight
 ```
 
-**Class-level afferent/efferent coupling (Ca/Ce → instability):**
-
+**Class-level Ca/Ce → instability:**
 ```cypher
 MATCH (c:Class {repo:$repo})
 OPTIONAL MATCH (caller:Class)-[:DECLARES]->(:Method)-[:CALLS]->(:Method)<-[:DECLARES]-(c)
 OPTIONAL MATCH (c)-[:DECLARES]->(:Method)-[:CALLS]->(:Method)<-[:DECLARES]-(callee:Class)
-RETURN c.gid,
-       count(DISTINCT caller) AS ca,
-       count(DISTINCT callee) AS ce
+RETURN c.gid, count(DISTINCT caller) AS ca, count(DISTINCT callee) AS ce
 ```
 
-Reuse the existing **"Component coupling (extraction difficulty)"** query
-from `cypher-queries.md` to read back `DEPENDS_ON` weights once written, and
-promote the two queries above into that file (per its conventions, since
-DISCOVER/DEBT also read them).
+Reuse the existing **"Component coupling (extraction difficulty)"** query from
+`cypher-queries.md` to read back `DEPENDS_ON` weights once written, and promote
+the two queries above into that file (DISCOVER/DEBT also read them).
 
-## How seam extractability is computed (and why the planner needs it)
+## Seam extractability (input to the planner)
 
-A `Seam` marks where a strangler-fig boundary can be inserted so a slice can
-be migrated behind a shim while the rest of the system keeps calling the old
-code. `extractability ∈ [0,1]` estimates how cheap and safe that cut is.
-We combine four boundary measurements:
+A `Seam` marks where a strangler-fig boundary can be inserted to migrate a slice
+behind a shim while the rest keeps calling old code. `extractability ∈ [0,1]`
+estimates how cheap/safe the cut is, combining four boundary measurements:
 
-1. **Afferent/efferent coupling at the boundary.** Few, narrow edges crossing
-   the cut → high score. A boundary the whole system calls through (high
-   crossing edge mass) is expensive to wrap → low score.
-2. **Shared-state crossings.** Count `READS`/`WRITES` where caller and callee
-   of the cut touch the **same** `Field` or `Table`. Shared mutable state
-   across a seam means a proxy can't be transparent → strong penalty.
-3. **Transaction boundaries.** If calls across the cut sit inside one
-   transaction (e.g. `@Transactional` spanning both sides), splitting risks
-   atomicity → penalty; a seam that aligns with an existing transaction edge
-   scores higher.
-4. **Interface readiness.** A boundary already fronted by an interface /
-   `isPublicApi` surface, or where one clean facade dominates inbound calls,
-   is near-trivial to wrap → bonus, and sets `seamKind` (`interface-facade`
-   when an interface exists, `branch-by-abstraction` when not yet,
-   `http-proxy`/`event-bridge` for cross-process edges, `feature-flag` for
-   runtime cutover).
+1. **Crossing coupling** — few, narrow edges across the cut → high; whole-system
+   call-through (high crossing mass) → low.
+2. **Shared-state crossings** — count READS/WRITES where both sides touch the
+   **same** Field/Table; shared mutable state means a proxy can't be transparent → strong penalty.
+3. **Transaction boundaries** — calls across the cut inside one transaction (e.g.
+   `@Transactional` spanning both sides) → penalty (atomicity risk); a seam aligned
+   with an existing txn edge scores higher.
+4. **Interface readiness** — a boundary already fronted by an interface/`isPublicApi`,
+   or one clean facade dominating inbound calls → bonus, and sets `seamKind`
+   (`interface-facade` if interface exists, `branch-by-abstraction` if not,
+   `http-proxy`/`event-bridge` for cross-process edges, `feature-flag` for runtime cutover).
 
-Roughly: `extractability = w1·(1−normCrossingCoupling) +
-w2·(1−sharedStatePenalty) + w3·(1−txnSplitPenalty) + w4·interfaceReadiness`,
-clamped to `[0,1]` with weights pinned per run for determinism.
+`extractability = w1·(1−normCrossingCoupling) + w2·(1−sharedStatePenalty) +
+w3·(1−txnSplitPenalty) + w4·interfaceReadiness`, clamped to [0,1], weights pinned per run.
 
-**Why the planner needs it:** the planner (L4) sizes and orders `ChangeUnit`s
-and picks where to land changes behind a seam (`GUARDS` edge). A high-
-extractability `Seam` is a cheap, low-blast-radius place to strangle first;
-a low one warns the planner that a slice is entangled (shared state /
-transactions) and must be sequenced later or decomposed. The score is an
-input to ordering and risk, so it must be explainable and reproducible.
+**Why the planner needs it:** the L4 planner sizes/orders ChangeUnits and picks
+where to land changes behind a seam (`GUARDS` edge). High extractability = cheap,
+low-blast-radius place to strangle first; low = entangled (shared state/txns),
+sequence later or decompose. The score feeds ordering + risk, so it must be
+explainable and reproducible.
 
 ## Graph writes (exact L1 mapping)
 
@@ -219,42 +175,31 @@ input to ordering and risk, so it must be explainable and reproducible.
 | Class cluster | `Component` node | `cohesion`, `coupling`, `responsibility`, `size` |
 | Architectural layer | `Layer` node | `name`, `expectedDependencies[]` |
 | Extraction boundary | `Seam` node | `seamKind`, `extractability` (0–1), `boundaryClasses[]` |
-| Class → its component | `BELONGS_TO` edge (Class→Component) | `confidence` |
-| Class → its layer | `BELONGS_TO` edge (Class→Layer) | `confidence` |
-| Component → component coupling | `DEPENDS_ON` edge | `weight` (call count) |
-| Component → layer | `LAYERED_AS` edge | — |
-| Illegal dependency | `VIOLATES` edge (Component/Class→Layer) | `rule` |
-| Seam → fenced component | `CANDIDATE_SEAM` edge | `extractability` |
+| Class → its component | `BELONGS_TO` (Class→Component) | `confidence` |
+| Class → its layer | `BELONGS_TO` (Class→Layer) | `confidence` |
+| Component coupling | `DEPENDS_ON` | `weight` (call count) |
+| Component → layer | `LAYERED_AS` | — |
+| Illegal dependency | `VIOLATES` (Component/Class→Layer) | `rule` |
+| Seam → fenced component | `CANDIDATE_SEAM` | `extractability` |
 
-All edges with `from.repo != to.repo` set `props.crossRepo = true` and name
-the shared `contract` GID (ontology §3.5 / edge-types Cross-repo).
+Edges with `from.repo != to.repo` set `props.crossRepo = true` and name the
+shared `contract` GID (ontology §3.5 / edge-types Cross-repo).
 
 ## Quality / invariants
-
-- **L0 is immutable.** Only add L1 nodes/edges/annotations; if you'd need to
-  change an L0 fact, the indexer is wrong — surface it, don't patch it.
-- **Every Class belongs to exactly one Component and one Layer** (`BELONGS_TO`
-  is a partition, not overlapping). Unassignable classes go to a residual
-  component with low `cohesion`, never dropped.
-- **`DEPENDS_ON` weights are derived, not invented:** each weight must equal
-  the summed `CALLS`/inheritance/shared-access mass between the components, so
-  the edge is reconstructable from L0.
-- **Confidence reflects evidence:** inferred clusters/layers set
-  `confidence < 1.0` (ontology §3.3); record `provenance.tool`.
-- **Determinism:** clusterer, resolution/threshold params, and seam weights
-  are pinned per `runId` so a re-run yields the same L1 (system-design §6).
-- **No orphans:** every `LAYERED_AS`/`VIOLATES` targets a `Layer` node that
-  exists; every `CANDIDATE_SEAM` targets a real `Component`.
-- **Defensive to unknowns:** ignore node/edge kinds you don't recognize
-  (forward-compat, ontology §5) rather than failing.
+- **L0 is immutable** — only add L1; if an L0 fact looks wrong, surface it (indexer bug), don't patch it.
+- **Partition:** every Class belongs to exactly one Component and one Layer (`BELONGS_TO` is not overlapping). Unassignable classes → residual component, low `cohesion`, never dropped.
+- **DEPENDS_ON weights are derived, not invented** — each weight = summed CALLS/inheritance/shared-access mass between components; reconstructable from L0.
+- **Confidence reflects evidence** — inferred clusters/layers `confidence < 1.0` (ontology §3.3); record `provenance.tool`.
+- **Determinism** — clusterer, resolution/threshold params, seam weights pinned per `runId` → re-run yields identical L1 (system-design §6).
+- **No orphans** — every `LAYERED_AS`/`VIOLATES` targets an existing `Layer`; every `CANDIDATE_SEAM` targets a real `Component`.
+- **Defensive to unknowns** — ignore unrecognized node/edge kinds (forward-compat, ontology §5) rather than failing.
 
 ## Definition of done
 
-Every `Class` in the repo is assigned to exactly one `Component` and one
-`Layer` via `BELONGS_TO`; inter-component `DEPENDS_ON` edges carry derived
-`weight`s; layering `VIOLATES` edges are flagged with a named `rule`; at
-least the viable extraction boundaries are emitted as `Seam` nodes with an
-explainable `extractability` and a `CANDIDATE_SEAM` edge; all outputs are
-additive L1 with `provenance.stage="architecture-recovery"`, the run is
-re-runnable to an identical graph, and L0 is untouched. The orchestrator can
-now advance the repo to DISCOVER.
+Every `Class` assigned to exactly one `Component` and one `Layer` via
+`BELONGS_TO`; inter-component `DEPENDS_ON` edges carry derived `weight`s;
+layering `VIOLATES` edges flagged with a named `rule`; at least the viable
+extraction boundaries emitted as `Seam` nodes with explainable `extractability`
++ `CANDIDATE_SEAM` edge; all outputs additive L1 with
+`provenance.stage="architecture-recovery"`; run is re-runnable to an identical
+graph; L0 untouched. Orchestrator can advance to DISCOVER.

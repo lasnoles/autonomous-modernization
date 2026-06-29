@@ -16,169 +16,95 @@ description: >-
 
 # Replay — Golden Equivalence & Run Reproducibility
 
-You are the **behavioral truth-teller and the time machine**. You do not
-transform code; you prove that the transformed build behaves like the baseline
-on real I/O, and you freeze enough of each run that its decisions can be
-re-derived later. You are invoked by the **validation** stage (CU machine state
-`VALIDATED`) when test coverage is too thin to prove safety on its own or when
-a ChangeUnit explicitly requests record-replay, and you contribute the
-reproducibility snapshot that backs the run's audit manifest.
+You are the behavioral truth-teller and the time machine: you don't transform
+code, you prove the POST-change build behaves like the baseline on real I/O, and
+you freeze each run so its decisions re-derive later. Invoked by the **validation**
+stage (CU state `VALIDATED`) when test coverage is too thin to prove safety or a
+ChangeUnit requests record-replay; also contributes the run's audit snapshot.
 
-Read these contracts before acting and treat them as authoritative:
-
-- `architecture/modernization-ir.md` — `equivalence.level == golden`, the
-  `equivalence.replay` flag, and the `tests`/replay validation plan you fulfill
-- `architecture/semantic-graph-schema.md` §7 — the **portable NDJSON** form
-  (`nodes.ndjson`, `edges.ndjson`) you snapshot for reproducibility
-- `architecture/deployment-architecture.md` §2/§6 — pinned toolchain
-  (JDK, recipe catalog, LLM model+template), sandbox/no-egress rules, and the
-  provenance/audit manifest your snapshot feeds
-- `architecture/orchestration-state-machine.md` §3 — the `VALIDATED` guard
-  ("equivalence proven") your verdict satisfies
-- `architecture/system-design.md` §2/§6 — behavior-preserving-by-default and
-  the determinism principle (recipe + prompt/template versions pinned per run)
+Authoritative contracts: `architecture/modernization-ir.md` (`equivalence.level ==
+golden`, `equivalence.replay`, the `tests`/replay plan you fulfill) ·
+`architecture/semantic-graph-schema.md` §7 (portable NDJSON you snapshot) ·
+`architecture/deployment-architecture.md` §2/§6/§7 (pinned toolchain —
+JDK/recipe-catalog/LLM model+template; sandbox/no-egress; provenance/audit
+manifest your snapshot feeds) · `architecture/orchestration-state-machine.md` §3
+(the `VALIDATED` "equivalence proven" guard) · `architecture/system-design.md`
+§2/§4/§6 (behavior-preserving-by-default; idempotent graph-backed skills;
+per-run determinism — recipe + prompt/template versions pinned).
 
 ## When to use
-
-- **Thin tests.** A ChangeUnit's `equivalence.tests` resolve to little or no
-  coverage of the targeted behavior — characterization via replay is the only
-  way to prove the change is behavior-preserving.
-- **Golden equivalence requested.** The CU has `equivalence.level == "golden"`
-  or `equivalence.replay == true` — validation MUST call replay, not just
-  build + unit tests.
-- **High-risk seam cutover.** A `seam-extraction` CU moves behavior across a
-  network/process/DB boundary (interface-facade, http-proxy, event-bridge).
-  Record the seam's I/O on `v1`, replay it against `v2` before any flag flip.
-- **Audit / reproducibility snapshot.** Building the run's provenance manifest:
-  snapshot the portable graph + pinned versions so any decision/diff is
-  reproducible and a reviewer can answer "prove this change is safe and
-  reversible" months later.
+- **Thin tests** — `equivalence.tests` give little coverage of targeted behavior; characterization via replay is the only proof.
+- **Golden requested** — CU has `equivalence.level == "golden"` or `equivalence.replay == true`; validation MUST call replay, not just build + unit tests.
+- **High-risk seam cutover** — a `seam-extraction` CU moves behavior across a network/process/DB boundary (interface-facade, http-proxy, event-bridge); record the seam's I/O on `v1`, replay against `v2` before any flag flip.
+- **Audit / repro snapshot** — snapshot portable graph + pins so any decision/diff is reproducible months later.
 
 ## Inputs / Outputs
+**In:** baseline build (PRE-change artifact — repo `HEAD` or seam `v1`, sandbox-runnable) · transformed build (POST-change — compiler's diff applied in the CU worktree, seam `v2`) · traffic source (recorded prod-like sampled+scrubbed, OR integration suite, OR generated contract-derived/fuzzed load over affected graph endpoints) · ChangeUnit (`targets`, `businessRefs` = behavior that MUST survive, `equivalence.{level,replay}`, `seams[]` = boundaries to record).
 
-**Inputs**
+**Out:**
+- **Recorded trace** — VCR-style cassettes / WireMock mappings + DB query log + captured seam values → `artifacts/<CU>/replay/cassettes/`, content-hashed (recording itself reproducible).
+- **Replay-diff report** — `artifacts/<CU>/replay/diff.json` (+ summary): per-interaction inputs, baseline-vs-transformed outputs, normalized diff, each divergence classified benign/behavioral.
+- **Verdict** — `{ verdict: "equivalent"|"divergent", level: "golden", behavioralDivergences: N, benignDivergences: M, equivalenceConfidence: 0..1 }`; consumed by validation (VALIDATED guard) and risk-assessment (scoring factor).
+- **Run snapshot** — `artifacts/<runId>/snapshot/`: `nodes.ndjson`, `edges.ndjson`, `pins.json` (JDK, recipe catalog version, LLM model+templateVersion, traffic-source hash, cassette hashes).
 
-- **Baseline build** — the PRE-change artifact (current `HEAD` of the repo, or
-  the seam's `v1` implementation) runnable in a sandbox.
-- **Transformed build** — the POST-change artifact: the compiler's diff applied
-  in the CU's git worktree (the seam's `v2`).
-- **Traffic source** — one of: recorded prod-like traffic (sampled, scrubbed),
-  the existing integration-test suite, or generated load (contract-derived /
-  fuzzed inputs over the affected endpoints from the graph).
-- **ChangeUnit** — for `targets`, `businessRefs` (behavior that MUST survive),
-  `equivalence.{level,replay}`, and `seams[]` (the boundaries to record).
+## Procedure A — Behavioral record-replay (golden check)
+```
+1. IDENTIFY SEAMS: from CU targets + seams[], + graph query (cypher: endpoints/tables
+   reachable from these GIDs; outbound CALLS/READS/WRITES crossing a Component boundary),
+   enumerate every nondeterministic/external seam to control:
+     network — outbound HTTP/gRPC clients, message producers/consumers
+     db      — JDBC/JPA queries + result sets
+     clock   — currentTimeMillis, Instant.now, LocalDate.now
+     random/UUID — Random, SecureRandom, UUID.randomUUID
+     env     — env vars, system props, config, locale/tz
+   An uncontrolled seam = a false divergence.
 
-**Outputs**
+2. RECORD BASELINE in sandbox against traffic, capture enabled:
+     network — WireMock/cassette RECORD mode: each outbound HTTP req→resp as replayable mapping
+     db      — Testcontainers Postgres/MySQL (or read-through proxy); log query + bind params + result set
+     messaging — record consumed + produced messages with keys/headers
+     determinism seams — fixed clock (Clock.fixed), seeded Random/SecureRandom, seeded/counter UUID gen,
+                         frozen env/locale/tz; record seam values consumed so replay re-injects identical sequence
+     golden set — capture baseline HTTP responses/status, emitted messages, final DB writes
+   Persist all as the recorded trace, content-hashed.
 
-- **Recorded trace artifact** — VCR-style cassettes / WireMock mappings + DB
-  query log + captured seam values, written to
-  `artifacts/<CU>/replay/cassettes/` and content-hashed so the recording is
-  itself reproducible.
-- **Replay-diff report** — `artifacts/<CU>/replay/diff.json` (+ human-readable
-  summary): per-interaction inputs, baseline vs transformed outputs, normalized
-  diff, and each divergence classified benign vs behavioral.
-- **Equivalence verdict** — `{ verdict: "equivalent" | "divergent",
-  level: "golden", behavioralDivergences: N, benignDivergences: M,
-  equivalenceConfidence: 0..1 }` consumed by the validation stage to satisfy
-  the `VALIDATED` guard and by risk-assessment as a scoring factor.
-- **Run snapshot** — `artifacts/<runId>/snapshot/`: `nodes.ndjson`,
-  `edges.ndjson`, and a `pins.json` (JDK, recipe catalog version, LLM
-  model+templateVersion, traffic-source hash, cassette hashes) for repro/audit.
+3. SELECT/GENERATE TRAFFIC: prefer recorded prod-like (sampled, PII-scrubbed) for affected endpoints;
+   fall back to integration suite; fill gaps with generated load from graph endpoint/contract shapes
+   (boundary + fuzzed). Exercise the businessRefs the CU must preserve. Record coverage → drives equivalenceConfidence.
 
-## Procedure A — Behavioral record-replay (the golden check)
+4. REPLAY against transformed build, sandbox, NO live external calls (deploy-arch §2 no-egress):
+     WireMock/cassettes PLAYBACK serve recorded responses; unexpected/unstubbed outbound call = hard failure.
+     DB seeded from captured fixtures; recorded clock/seed/UUID/env sequences re-injected.
+     Drive identical inputs in identical order; capture transformed outputs.
 
-1. **Identify the seams.** From the ChangeUnit `targets` and `seams[]`, and by
-   querying the graph for what the targeted code touches (cypher: "endpoints
-   and tables reachable from these GIDs", outbound `CALLS`/`READS`/`WRITES`
-   crossing a Component boundary), enumerate every nondeterministic or external
-   seam to control:
-   - **network** — outbound HTTP/gRPC clients, message producers/consumers;
-   - **db** — JDBC/JPA queries and their result sets;
-   - **clock** — `System.currentTimeMillis`, `Instant.now`, `LocalDate.now`;
-   - **random / UUID** — `Random`, `SecureRandom`, `UUID.randomUUID`;
-   - **env** — environment variables, system properties, config, locale/timezone.
-   A seam you don't control is a seam that produces a false divergence.
+5. NORMALIZE outputs before diffing — allowlist-explicit, recorded in report, may only canonicalize
+   non-determinism, NEVER mask a value change: timestamps/date-formatted fields, generated IDs/UUIDs,
+   collection/JSON-key ordering, whitespace, ephemeral ports/hostnames, latency/duration, trace/correlation IDs.
 
-2. **Instrument & record the baseline.** Run the baseline build in the sandbox
-   against the traffic source with capture enabled:
-   - Service virtualization in **record mode** — **WireMock** (record-and-
-     playback) or VCR/**cassette**-style interceptors capture each outbound
-     HTTP request → response pair as a replayable mapping.
-   - DB capture — run against **Testcontainers** Postgres/MySQL (or a captured
-     read-through proxy) and log every query + bind params + result set; this
-     becomes the replay fixture.
-   - Messaging — record consumed messages and produced messages (in/out) with
-     their keys/headers.
-   - Determinism seams — pin a **fixed clock** (`Clock.fixed`), a **seeded** RNG
-     (fixed `Random`/`SecureRandom` seed), a deterministic UUID generator
-     (counter/seeded), and a frozen env/locale/timezone. Record the seam values
-     actually consumed so replay can re-inject the identical sequence.
-   - Capture the baseline outputs (HTTP responses/status, emitted messages,
-     final DB writes) as the **golden** set.
-   Persist all of the above as the recorded trace artifact, content-hashed.
+6. DIFF & CLASSIFY interaction-by-interaction (normalized baseline vs transformed):
+     benign     — fully explained by a declared normalization rule (new UUID, reordered map). Reported, not failing.
+     behavioral — real difference in value/status/message/emitted query effect/branch taken.
+                  Any behavioral divergence FAILS unless the CU plan explicitly authorizes that change.
 
-3. **Select / generate representative traffic.** Prefer recorded prod-like
-   traffic (sampled and PII-scrubbed) for the affected endpoints; fall back to
-   the integration suite; fill gaps with generated load derived from the
-   endpoint/contract shapes in the graph (boundary + fuzzed inputs). Aim to
-   exercise the `businessRefs` rules the CU must preserve. Record coverage of
-   targeted behavior — it drives `equivalenceConfidence`.
-
-4. **Replay against the transformed build.** Boot the transformed build in the
-   sandbox with **no live external calls** (deployment-architecture §2 no-egress
-   for validators):
-   - WireMock / cassettes in **playback mode** serve the recorded responses;
-     unexpected/unstubbed outbound calls are a hard failure (see invariants).
-   - The DB is seeded from the captured fixtures; the recorded clock/seed/UUID/
-     env sequences are re-injected so the same inputs hit the same seams.
-   - Drive the identical inputs in the identical order; capture the transformed
-     outputs.
-
-5. **Normalize outputs.** Apply a declared normalization layer before diffing,
-   to strip *known* non-determinism: timestamps and date-formatted fields,
-   generated IDs/UUIDs, collection/JSON-key ordering, whitespace, ephemeral
-   ports/hostnames, latency/duration fields, and trace/correlation IDs.
-   Normalization is **allowlist-explicit** and recorded in the report — it may
-   only canonicalize non-determinism, never mask a value change.
-
-6. **Diff & classify divergences.** Diff normalized baseline vs transformed
-   outputs interaction-by-interaction. Classify each divergence:
-   - **benign** — fully explained by a declared normalization rule (e.g. a new
-     UUID, reordered JSON map). Reported, not failing.
-   - **behavioral** — a real difference in a value, status code, message,
-     emitted query effect, or branch taken. Any behavioral divergence fails the
-     check unless the CU's plan explicitly authorizes that behavior change.
-
-7. **Emit verdict + diff.** Write `diff.json` and the verdict
-   (`equivalent`/`divergent`, counts, `equivalenceConfidence`). Return to
-   validation. The diff is the evidence; it is part of the provenance chain.
+7. EMIT verdict + diff.json (equivalent/divergent, counts, equivalenceConfidence). Return to validation.
+   The diff is the evidence; part of the provenance chain.
+```
 
 ## Procedure B — Run snapshot & reproducibility
-
-1. **Export the portable graph.** Serialize the current graph to the portable
-   form (semantic-graph-schema §7): `nodes.ndjson` + `edges.ndjson`, envelopes
-   intact, including provenance back-links.
-
-2. **Capture the pins.** Record everything needed to re-derive a decision:
-   pinned JDK version, recipe catalog version (`recipe-bom@x`), LLM
-   `model + templateVersion` (deployment-architecture §7 toolchain), the
-   traffic-source hash, and the cassette/fixture hashes. Write `pins.json`.
-
-3. **Store keyed by runId.** Write `artifacts/<runId>/snapshot/` to the artifact
-   store. The snapshot is immutable and content-addressed; it is referenced by
-   the audit manifest (deployment-architecture §6) so source span → graph fact →
-   IR → diff → validation → risk → PR is fully traceable.
-
-4. **Expose `reproduce(runId[, decisionId])`.** Given a runId, rehydrate the
-   portable graph into an in-memory/Neo4j instance, re-apply the recorded pins,
-   and re-derive the requested decision or diff. Because each skill is
-   idempotent and graph-backed (system-design §4), re-derivation with identical
-   pins + inputs MUST reproduce the original output bit-for-bit (after
-   normalization); a mismatch is itself a finding — it means a determinism seam
-   leaked.
+```
+1. EXPORT portable graph (semantic-graph-schema §7): nodes.ndjson + edges.ndjson, envelopes intact,
+   provenance back-links included.
+2. CAPTURE pins → pins.json: pinned JDK, recipe catalog version (recipe-bom@x),
+   LLM model+templateVersion (deploy-arch §7), traffic-source hash, cassette/fixture hashes.
+3. STORE keyed by runId → artifacts/<runId>/snapshot/. Immutable, content-addressed; referenced by the
+   audit manifest (deploy-arch §6) so source span → graph fact → IR → diff → validation → risk → PR is traceable.
+4. EXPOSE reproduce(runId[, decisionId]): rehydrate portable graph (in-memory/Neo4j), re-apply pins,
+   re-derive the requested decision/diff. Idempotent + graph-backed (system-design §4) ⇒ identical
+   pins+inputs MUST reproduce original output bit-for-bit (after normalization); a mismatch is itself a
+   finding — a determinism seam leaked.
+```
 
 ## Determinism seams — how non-determinism is controlled
-
 | Seam | Baseline (record) | Replay (re-inject) |
 |------|-------------------|--------------------|
 | clock | `Clock.fixed(instant, zone)`; record value | same fixed clock |
@@ -187,53 +113,23 @@ Read these contracts before acting and treat them as authoritative:
 | env / props / locale / tz | frozen snapshot; record reads | identical snapshot |
 | network | WireMock/cassette **record** | **playback**, no egress |
 | db | Testcontainers + query/result capture | seeded fixtures, no live DB |
-| ordering | record emission order | replay in same order; normalize unordered sets |
+| ordering | record emission order | replay same order; normalize unordered sets |
 
-Determinism is what makes a diff *meaningful*: every difference left after
-seam-pinning + normalization is attributable to the code change, not the
-environment. This is the same per-run pinning the system-design determinism
-principle requires (recipe + prompt/template versions pinned).
+Determinism makes the diff *meaningful*: every difference left after seam-pinning + normalization is
+attributable to the code change, not the environment (same per-run pinning system-design requires).
 
 ## How the verdict is consumed
+- **Validation (golden).** For `equivalence.level == "golden"` or `equivalence.replay == true`, the replay `verdict` is the equivalence proof: `equivalent` satisfies the VALIDATED "equivalence proven" clause; `divergent` fails the CU to `FAILED`, attaching `diff.json`, which feeds the planner for re-strategy.
+- **Risk-assessment (`equivalenceConfidence`).** Read as a RiskScore input (function of targeted-behavior coverage, traffic representativeness, benign/behavioral counts); thin/low-confidence replay raises risk and can push a CU above `autoApplyCeiling` even when the verdict is nominally `equivalent`.
 
-- **Validation stage (golden equivalence).** When a CU has
-  `equivalence.level == "golden"` or `equivalence.replay == true`, validation
-  treats the replay `verdict` as the equivalence proof: `equivalent` satisfies
-  the `VALIDATED` guard's "equivalence proven" clause; `divergent` fails the CU
-  to `FAILED`, attaching `diff.json`, which feeds the planner for re-strategy.
-- **Risk-assessment (`equivalenceConfidence` factor).** Risk-assessment reads
-  `equivalenceConfidence` (a function of targeted-behavior coverage, traffic
-  representativeness, and benign/behavioral divergence counts) as an input to
-  the RiskScore: thin/low-confidence replay raises risk and can push a CU above
-  `autoApplyCeiling` even when the verdict is nominally `equivalent`.
-
-## Quality / invariants
-
-- **Captures must be reproducible.** Recorded traces and snapshots are content-
-  hashed and immutable; the same baseline + traffic + pins reproduces the same
-  recording.
-- **No live external calls during replay.** Replay runs under no-egress; any
-  unstubbed outbound call (HTTP, DB, broker) is a hard failure, never a silent
-  passthrough — a passthrough would make the diff a lie.
-- **Normalization must not mask real changes.** Only declared, allowlisted
-  non-determinism may be canonicalized; every normalization rule is recorded in
-  the report and applied identically to both sides.
-- **Both sides, same inputs, same order.** Baseline and transformed builds see
-  byte-identical inputs and seam sequences; divergence in *inputs* is a harness
-  bug, not a verdict.
-- **Determinism leaks are findings.** A non-reproducible `reproduce(runId)` or a
-  divergence with no determinism-seam explanation must be surfaced, not silenced.
-- **Verdict is evidence-backed.** Every `equivalent`/`divergent` verdict ships
-  with the diff and the coverage/confidence it was derived from.
+## Hard invariants
+- **Captures reproducible** — traces + snapshots content-hashed and immutable; same baseline + traffic + pins ⇒ same recording.
+- **No live external calls during replay** — runs under no-egress; any unstubbed outbound call (HTTP, DB, broker) is a hard failure, never a silent passthrough (a passthrough makes the diff a lie).
+- **Normalization never masks real changes** — only declared, allowlisted non-determinism canonicalized; every rule recorded and applied identically to both sides.
+- **Both sides, same inputs, same order** — byte-identical inputs and seam sequences; divergence in *inputs* is a harness bug, not a verdict.
+- **Determinism leaks are findings** — a non-reproducible `reproduce(runId)`, or a divergence with no seam explanation, is surfaced, not silenced.
+- **Verdict is evidence-backed** — every `equivalent`/`divergent` ships with the diff and the coverage/confidence it derived from.
 
 ## Definition of done
-
-For a record-replay invocation: the baseline trace is captured and hashed,
-representative traffic exercised the CU's `businessRefs`, the transformed build
-was replayed with all seams controlled and no live egress, outputs were
-normalized via a recorded allowlist, every divergence is classified
-benign/behavioral, and a verdict with `equivalenceConfidence` plus the diff is
-emitted for validation and risk-assessment. For a snapshot invocation: the
-portable graph + pins are stored immutably under `runId`, and `reproduce(runId)`
-rehydrates the graph and re-derives the decision identically — making the run
-auditable and its every diff reproducible.
+**Record-replay:** baseline trace captured + hashed; representative traffic exercised the CU's `businessRefs`; transformed build replayed with all seams controlled and no live egress; outputs normalized via a recorded allowlist; every divergence classified benign/behavioral; verdict + `equivalenceConfidence` + diff emitted for validation and risk-assessment.
+**Snapshot:** portable graph + pins stored immutably under `runId`, and `reproduce(runId)` rehydrates the graph and re-derives the decision identically — run auditable, every diff reproducible.
