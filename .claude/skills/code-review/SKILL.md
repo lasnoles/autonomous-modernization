@@ -7,9 +7,11 @@ description: >-
   exceptions, empty/log-and-continue catches, ignored error returns, and missing
   dependencies/services treated as a silent no-op or default value. Policy:
   fail-loud — errors must be surfaced (raised, returned, or turned into a tracked
-  Gap), never silently ignored unless a strong reason is explicitly recorded. Runs
-  per ChangeUnit (after VALIDATED, before RISK_SCORED) and as a repo-scope final
-  sweep after EXECUTE before INTEGRATE. A high-severity silent-ignore finding is a
+  Gap), never silently ignored unless a strong reason is explicitly recorded. Also
+  reviews TEST COVERAGE of the changed code (not just validation's number) and
+  requires a test asserting each flagged error path actually surfaces. Runs per
+  ChangeUnit (after VALIDATED, before RISK_SCORED) and as a repo-scope final sweep
+  after EXECUTE before INTEGRATE. A high-severity silent-ignore finding is a
   BLOCKING gate. Use to review a CU diff or a completed repo's cumulative change.
 ---
 
@@ -60,7 +62,7 @@ Python exceptions) · the run's review config (`gates.review`, justification all
   "verdict": "approve|approve-with-conditions|reject",
   "findings": [
     { "severity":"high|med|low",
-      "type":"silent-error-swallow|missing-dependency-ignored|behavioral-risk|coverage-gap|rollback-hazard|contract-break|nit",
+      "type":"silent-error-swallow|missing-dependency-ignored|untested-error-path|coverage-gap|test-quality|behavioral-risk|rollback-hazard|contract-break|nit",
       "location":"file:line", "issue":"...", "endangers":"rule/caller GID",
       "intentMismatch":"what the code does vs. what the spec/flow intends",
       "fix":"...", "justified": false, "justification": null }
@@ -100,8 +102,23 @@ Python exceptions) · the run's review config (`gates.review`, justification all
 
 5. CONTRACT — does the diff alter a shared API/event/schema shape? List dependents to re-validate.
 
-6. COVERAGE GAPS validation flagged — uncovered changed lines, skipped/flaky tests, equivalence on
-   thin evidence, llm-patch with no characterization test. (Ignore `nit`s unless asked.)
+6. TEST COVERAGE & TEST QUALITY — don't just relay validation's number; review whether the change is
+   actually PROVEN. Read the validation-report's changed-code coverage + the tests touching the diff:
+   • Changed-code coverage below `gates.validation.minCoverageDelta`, OR specific changed methods/
+     branches with no covering test → name them (uncovered `file:line`), don't accept the aggregate %.
+   • BRANCH coverage of the error/exception paths flagged in dimension 1 (high — fail-loud tie-in):
+     a fix that surfaces an error MUST have a test asserting it now raises/returns (and that the
+     missing-service case errors, not silently passes). An untested error path = a blocking finding —
+     "stopped swallowing" is unverified without a test that fails if it regresses.
+   • Test quality, not just presence: assertions are meaningful (assert behavior/outputs, not that code
+     merely ran); characterization tests assert the RECORDED baseline value (would fail on a behavior
+     change), not a trivially-true value; negative/edge/error cases exist, not only the happy path.
+   • Masking: skipped/`@Disabled`/`@Ignore`/`xfail`, quarantined-flaky, or commented-out tests that
+     hide a gap; equivalence asserted on thin evidence; `llm-patch`/`generate` output with no
+     characterization test. (Ignore pure-`nit`s unless asked.)
+   Severity: untested error/exception path (dim-1 tie-in) → high (blocking); other coverage/quality
+   gaps → med (approve-with-conditions, list the specific tests to add). `gates.review.requireErrorPathTests`
+   (default true) makes the error-path case blocking.
 ```
 
 ## Justification — the only escape from a blocking error-handling finding
@@ -138,6 +155,8 @@ Findings always feed `risk-assessment` (raise the score) regardless of gating.
 ## Definition of done
 The diff (or the repo's cumulative change) is reviewed across all six dimensions; every error/exception
 site touched by the change is judged surface-vs-swallow with a citation; missing-dependency handling is
-checked against the fail-loud policy; blocking findings are recorded as Gaps/Questions and the CU/repo is
+checked against the fail-loud policy; **changed-code test coverage is reviewed (not just relayed) and
+every flagged error path has a test asserting it surfaces** — an untested error path is a blocking
+finding; blocking findings are recorded as Gaps/Questions and the CU/repo is
 held (not advanced) until fixed or justified with a recorded strong reason; the `review-report` is written
 with a verdict, and findings are fed to `risk-assessment`. Nothing silently ignored has passed unrecorded.
