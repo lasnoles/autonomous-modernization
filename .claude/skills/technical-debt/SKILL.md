@@ -64,11 +64,23 @@ the L3 layer (nodes + attaching edges) and never edit L0/L1/L2 nodes in place.
 
 ## Procedure
 
+> **Stream scanner output; never load a whole findings report into context.** On
+> large estates the dependency-check / OSV / SpotBugs reports and the
+> `Dependency`/`Class` result sets are big. Run scanners to a **file in the
+> artifact store**, then page through that report in batches of
+> `execution.batchSize`, emitting each batch's L3 nodes/edges and dropping it
+> before the next (`architecture/scalability-and-retrieval.md` §1a). Process **one
+> module at a time** for dependency/vuln work and **one component at a time** for
+> complexity/smell work, checkpointing a cursor per batch so a timeout resumes
+> mid-scan. Never hold the full report or the full node list in context.
+
 1. **Scan dependencies for outdated & vulnerable versions.** From the L0
    `Module`/`Dependency` nodes and the on-disk manifests, run
    **OWASP dependency-check** and the **OSV** database (`osv-scanner`) — and the
    build-native staleness check (`mvn versions:display-dependency-updates` /
-   Gradle `dependencyUpdates`).
+   Gradle `dependencyUpdates`) — **writing each scanner's output to the artifact
+   store, then reading it back in batches** (do not inline a multi-thousand-line
+   report into context).
    - Each library behind a non-trivial version delta → `DebtItem`
      `category="outdated-dep"`, attached `HAS_DEBT` to its owning `Module`,
      `evidence` = current vs latest coordinates and the manifest line.
@@ -107,7 +119,9 @@ the L3 layer (nodes + attaching edges) and never edit L0/L1/L2 nodes in place.
 5. **Detect code smells & architecture violations.** Run **PMD**, **SpotBugs**
    (+ **find-sec-bugs** for insecure code patterns), and **Sonar**-style rules
    for smells (god class, long method, duplicated blocks, dead code via the
-   "dead code candidates" cypher). Emit `category="code-smell"` `DebtItem`s.
+   "dead code candidates" cypher) **to report files, then ingest those reports in
+   `execution.batchSize` batches per component** — emit each batch's
+   `category="code-smell"` `DebtItem`s and release it before reading the next.
    For architecture debt, **reuse L1 `VIOLATES`** (query "Layering violations")
    rather than re-deriving layering — wrap each violation as a
    `category="architecture-violation"` `DebtItem` whose evidence cites the

@@ -85,6 +85,14 @@ GIDs follow schema §1, e.g. `billing-svc::Capability::Invoicing`,
 
 ## Procedure
 
+> **Discover one capability/flow at a time, methods in batches.** Don't load the
+> repo's whole method set or every flow at once. Iterate capabilities; within a
+> capability page its methods in batches of `execution.batchSize`, write the
+> resulting L2 rules/edges to the graph per batch, and drop the batch before the
+> next (`architecture/scalability-and-retrieval.md` §1a). Fetch only the **exact
+> evidence spans** you cite (never whole files), and checkpoint a cursor
+> (capability, lastMethod) so a timeout resumes mid-discovery.
+
 0. **Start from every flow (no single front door).** The `Flow` slices were
    traced at INDEX (L0, owned by `semantic-indexer` — one per entry point across
    all surfaces; see `architecture/entry-point-discovery.md`). **Read** them via

@@ -165,6 +165,14 @@ the checkpoint and keep accumulating across restarts. Full protocol:
   each in its own git worktree/branch.
 - Cross-repo CUs (touching a shared contract) acquire a logical lock on the
   contract GID to serialize conflicting edits.
+- **Bounded context per stage.** Each stage runs as its own subagent and pages
+  its inputs (deps, findings, classes, rows, files) in `execution.batchSize`
+  batches with `maxConcurrentReads` in flight, writing results to the graph and
+  releasing each batch before the next; the orchestrator keeps only structured
+  results and flushes scoped subgraphs between stages/CUs. This is what keeps
+  large multi-repo runs inside the context window — see
+  `architecture/scalability-and-retrieval.md` §1a. A batch cursor is part of the
+  checkpoint (§5), so a timed-out scan resumes mid-stage, not from scratch.
 
 ## 7. Failure policy
 

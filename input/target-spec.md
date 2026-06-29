@@ -105,6 +105,14 @@ concurrency:
   maxRepos: 4
   maxCUsPerRepo: 6
 
+execution:                                     # context/throughput controls — keep small on large estates
+  batchSize: 25                                # items (deps/findings/classes/files/rows) processed per batch
+  maxConcurrentReads: 4                        # files/queries read in flight at once
+  maxSpans: 400                                # per-stage source-span read budget (subdivide, don't exceed)
+  maxBytes: 2_000_000                          # per-stage byte budget for source reads
+  flushBetweenBatches: true                    # release each batch from context after writing its results
+  flushBetweenStages: true                     # drop a stage's scoped subgraph/spans before the next stage
+
 acceptance:                                    # run-level definition of done
   - "Build green on Java 21 / Spring Boot 3."
   - "All existing + characterization tests pass; no behavioral regression."

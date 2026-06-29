@@ -74,11 +74,16 @@ groupings set `confidence < 1.0` per ontology §3.
 
 ## Procedure
 
-1. **Pull the structural graph.** Load the repo's L0 projection with cypher
-   (see *Example reads*): all `Class` nodes with their `package`,
-   `annotations[]`, `isPublicApi`; the method-level `CALLS` graph lifted to
-   class granularity; `EXTENDS`/`IMPLEMENTS`; and `READS`/`WRITES` to `Field`
-   and `Table`. Do not parse source. If a node's source `hash` is unchanged
+1. **Pull the structural graph — per module, paged, not the whole repo.** Load the
+   L0 projection with cypher (see *Example reads*) **one `Module` at a time**, and
+   within a module page `Class` nodes with `SKIP`/`LIMIT` in batches of
+   `execution.batchSize` (`architecture/scalability-and-retrieval.md` §1a): each
+   class's `package`, `annotations[]`, `isPublicApi`; the method-level `CALLS`
+   graph lifted to class granularity; `EXTENDS`/`IMPLEMENTS`; `READS`/`WRITES` to
+   `Field`/`Table`. **Do not load "all Class nodes" at once** — that is the bulk
+   read that times out large repos. Hold only the current module's projection
+   (plus the cross-module `DEPENDS_ON` weight tallies, which are small aggregates,
+   not node lists). Do not parse source. If a node's source `hash` is unchanged
    since the last run, reuse its prior cluster assignment (incremental).
 
 2. **Build the class dependency graph.** Project method `CALLS` onto an
