@@ -117,6 +117,15 @@ autonomy:                                      # how far it may go without you
                                                 #   always = always surface the approach proposal for approval
                                                 # complex/heterogeneous estates: keep `review` (or `always`)
 
+review:                                         # code-review gate (skill: code-review) — runs per CU
+                                                # (after VALIDATED, before RISK_SCORED) + repo-scope final sweep.
+  failOnSilentErrorHandling: true               # HARD-block high findings: swallowed exception, ignored error
+                                                # return, missing service handled as silent no-op/default. (fail-loud)
+  blockSeverity: high                           # severity that blocks (high → PAUSED/NEEDS_HUMAN until fixed/justified)
+  justifiedIgnores: []                          # the ONLY escape: explicit allowlist of deliberate ignores, e.g.
+                                                #   - { location: "PaymentClient.java:88", reason: "best-effort metrics; failure is non-fatal", approver: "min" }
+                                                # (or an inline `// review:ignore-error reason=… approver=…` at the site)
+
 concurrency:
   maxRepos: 4
   maxCUsPerRepo: 6

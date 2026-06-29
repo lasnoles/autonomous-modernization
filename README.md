@@ -14,15 +14,15 @@ strangler-fig pattern with automatic rollback.
 
 ```
 orchestrator (state machine)
-  └─ for each repo:  INDEX → RECOVER → DISCOVER → DEBT → PLAN → EXECUTE → INTEGRATE → COMPLETE
-                       │       │          │         │      │       │          └─ stand up full
-                       │       │          │         │      │       │             system (Podman) +
-                       │       │          │         │      │       │             monitoring, run E2E
-                       │       │          │         │      │       │             from prod traces,
-                       │       │          │         │      │       │             certify it works
+  └─ for each repo:  INDEX → RECOVER → DISCOVER → DEBT → PLAN → EXECUTE → REVIEW → INTEGRATE → COMPLETE
+                       │       │          │         │      │       │         │   └─ stand up full
+                       │       │          │         │      │       │         │      system (Podman) +
+                       │       │          │         │      │       │         │      monitoring, run E2E
+                       │       │          │         │      │       │         └─ repo-scope final
+                       │       │          │         │      │       │            fail-loud review
                        │       │          │         │      │       └─ per ChangeUnit (roles:
                        │       │          │         │      │          developer+devops+tester):
-                       │       │          │         │      │          COMPILE → VALIDATE → RISK
+                       │       │          │         │      │          COMPILE → VALIDATE → REVIEW → RISK
                        │       │          │         │      │          → APPLY/ROLLBACK
                        ▼       ▼          ▼         ▼      ▼
                   semantic  arch.     business   tech.  planner ──emits──▶ Modernization IR
@@ -64,6 +64,7 @@ L5 risk), so each stage queries rather than re-parses.
 | `transformation-compiler` | COMPILE | — | Lowers a ChangeUnit to a candidate diff (recipe → codemod → llm-patch). |
 | `validation` | VALIDATE | — | Build + tests + behavioral equivalence; backfills characterization tests. |
 | `replay` | VALIDATE/audit | — | Golden record-replay equivalence + run reproducibility snapshots. |
+| `code-review` | REVIEW | — | Intent & **fail-loud** review of the change (exception/error handling, no silent-ignore); per-CU gate + repo-scope final sweep. Blocking by default. |
 | `risk-assessment` | RISK | L5 | Calibrated risk score + auto/pause/block decision with explanation. |
 | `developer` | EXECUTE | — | Finishes the compiler's diff into working, integrated code (incl. against placeholder interfaces). |
 | `devops` | EXECUTE / INTEGRATE | — | Stands up the service + dependents as **Podman** containers + monitoring. |

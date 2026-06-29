@@ -50,6 +50,7 @@ Not for gating analysis stages, doing the apply, or validating behavior.
 |-------|--------|
 | Validated `ChangeUnit` node (L4) | graph — `kind`, `strategy`, `equivalence`, `blastRadius`, `targets`, `PRESERVES`/`TRANSFORMS` |
 | Validation report (+ replay report if `equivalence.replay`) | artifact store — build/test, changed-code coverage, equivalence verdict |
+| Review report (`code-review`) | artifact store — intent/fail-loud findings; unresolved med/high findings **raise** the score (high = a hard override toward pause/block) |
 | Semantic graph | graph — blast-radius + cross-repo traversals |
 | `gates.risk` + `gates.review.requireHumanFor` | Modernization IR §5 |
 
