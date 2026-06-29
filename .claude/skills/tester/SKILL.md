@@ -35,9 +35,9 @@ them as authoritative:
 - `architecture/orchestration-state-machine.md` — **§8 roles** (you run inside
   EXECUTE per CU and at repo scope in INTEGRATE) and **§9 INTEGRATE exit
   criteria** ("the system works").
-- `skills/replay/SKILL.md` — cassettes, determinism seams, and the
+- `.claude/skills/replay/SKILL.md` — cassettes, determinism seams, and the
   `equivalenceConfidence` your E2E feeds; you reuse its capture/playback engine.
-- `skills/validation/SKILL.md` — per-CU equivalence, which you elevate to a
+- `.claude/skills/validation/SKILL.md` — per-CU equivalence, which you elevate to a
   whole-system E2E equivalence check against recorded production baselines.
 - `graph/node-types.md` + `graph/edge-types.md` — `Mock`, `E2EScenario`,
   `InterfaceContract`, `ExternalSystem`, `Capability`, `Endpoint`, and the

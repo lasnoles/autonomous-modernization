@@ -12,7 +12,7 @@ before COMPLETE) and a **role model** for the code-write/execute phase.
 ## 1. Delivery roles
 
 During EXECUTE and INTEGRATE the orchestrator dispatches four collaborating
-roles (each a skill under `skills/`). They are distinct responsibilities, not
+roles (each a skill under `.claude/skills/`). They are distinct responsibilities, not
 distinct people — the autopilot plays all of them.
 
 | Role | Skill | Owns |

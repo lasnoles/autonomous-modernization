@@ -19,9 +19,17 @@ per CU during the apply stages and can execute many CUs concurrently
 ```
         ┌──────────┐
         │  INTAKE  │  clone/refresh worktree, detect build system, pin toolchain,
-        │          │  run tool preflight (tooling/manifest.yaml — verify→container→adapt-install→verify)
+        │          │  validate MANDATORY inputs (repoScan + productionTraces — Target
+        │          │  Spec §1 `inputs`); missing/unresolved ⇒ blocking Question, no explore
         └────┬─────┘
              ▼
+        ╓──────────╖
+        ║ PREFLIGHT║  HARD GATE — run tool preflight against tooling/manifest.yaml
+        ║   GATE   ║  (verify→container→adapt-install→verify) for EVERY required tool
+        ╙────┬─────╜  the run will use. No exploration starts until all required tools
+             │        verify at their pinned versions; record toolchainHash. Any
+             │        unresolved required tool ⇒ blocking Question (do NOT enter INDEX).
+             ▼        See tooling-and-provisioning.md §3.
         ┌──────────┐
         │  INDEX   │  → skill: semantic-indexer        (writes L0)
         └────┬─────┘
@@ -63,6 +71,14 @@ per CU during the apply stages and can execute many CUs concurrently
                                                                           ▼
                                                           (see ChangeUnit machine §3)
 ```
+
+**PREFLIGHT gate guard:** INDEX (the first stage that explores/reads source) must
+not begin until preflight reports every required (non-optional) tool in
+`tooling/manifest.yaml` verified at its pinned version. Optional tools may be
+deferred but their absence is logged. Any unresolved required tool is a blocking
+Question — the repo waits in the gate, it does not start exploring on a partial
+toolchain. This makes "all tools present" an explicit precondition of exploration,
+not a best-effort side task. See `architecture/tooling-and-provisioning.md` §3.
 
 Guards between analysis stages: each stage must write its layer with
 `status=ok` and no fatal errors before the next begins. INTEGRATE's guard is the

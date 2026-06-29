@@ -44,7 +44,7 @@ When two artifacts conflict, the higher one prevails.
    machine, the graph schema/ontology. Skills conform to these; if a skill's
    behavior diverges from a contract, the contract wins (fix the skill).
 
-5. **Skill instructions** (`skills/*/SKILL.md`) and **prompts** (`prompts/*`)
+5. **Skill instructions** (`.claude/skills/*/SKILL.md`) and **prompts** (`prompts/*`)
    Authoritative for *how a given step is performed*, within the contracts above.
 
 6. **Derived artifacts** (NOT sources of truth — regenerable):
@@ -122,7 +122,7 @@ Full procedure: `architecture/open-question-resolution.md`.
 
 Every node, edge, and diff records `provenance` (stage, tool, model+template
 version, runId, source-span hash). This lets any derived fact be traced back to
-its source of truth and reproduced (`skills/replay`), satisfying the audit
+its source of truth and reproduced (`.claude/skills/replay`), satisfying the audit
 requirement in `architecture/deployment-architecture.md` §6. If you can't trace
 a fact to an authoritative source, treat it as untrusted.
 
@@ -134,6 +134,6 @@ a fact to an authoritative source, treat it as untrusted.
 WANT  ─ Target Spec (input/<run>.md) ─────────────► drives the run
 IS    ─ Repo source (git @ pinned commit) ────────► ground truth for behavior
 RULES ─ architecture/ + graph/ contracts ─────────► how the autopilot works
-HOW   ─ skills/*/SKILL.md + prompts/* ────────────► how each step runs
+HOW   ─ .claude/skills/*/SKILL.md + prompts/* ────► how each step runs
 CACHE ─ graph, IR, diffs, reports ────────────────► derived; regenerate on doubt
 ```

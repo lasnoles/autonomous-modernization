@@ -38,7 +38,7 @@ treat them as authoritative:
   the CU machine you live inside (COMPILED → VALIDATED → …)
 - `architecture/modernization-ir.md` — the `ChangeUnit`, its `seams`,
   `equivalence`, `businessRefs` (PRESERVES) you must honor (§2, §4)
-- `skills/transformation-compiler/SKILL.md` — the candidate diff + `compile.json`
+- `.claude/skills/transformation-compiler/SKILL.md` — the candidate diff + `compile.json`
   (engine, rung, assumptions, self-review) you pick up
 - `graph/node-types.md` + `graph/edge-types.md` — `ExternalSystem`,
   `InterfaceContract`, `Gap`; `DEPENDS_ON_EXTERNAL`, `CONTRACTED_BY`, `HAS_GAP`

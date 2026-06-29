@@ -45,7 +45,7 @@ L5 risk), so each stage queries rather than re-parses.
 | `OPERATOR-GUIDE.md` | **For whoever runs the autopilot** — start/watch/answer/approve/resume/rollback, the `modernize` commands, and a daily-session walkthrough. |
 | `architecture/` | The authoritative contracts: system design, graph schema, **Modernization IR**, **orchestration state machine**, deployment. Read these first. |
 | `graph/` | Graph ontology, node types, edge types, reusable Cypher queries. |
-| `skills/` | The agent skills — `orchestrator` (the control layer) plus one per pipeline step. Each has a `SKILL.md`. |
+| `.claude/skills/` | The agent skills — `orchestrator` (the control layer) plus one per pipeline step. Each has a `SKILL.md`. Lives under `.claude/` so Claude Code auto-discovers them. |
 | `prompts/` | LLM prompt templates (planner, reviewer, architect, test-generator, patch-generator). |
 | `workflows/` | Declarative pipelines binding the state machine to skills (`modernization`, `strangler-fig`, `seam-extraction`, `rollback`). |
 | `recipes/` | The transformation catalogs the compiler draws from (OpenRewrite, ts-morph, Roslyn, llm-fallback, port profiles). |
@@ -146,7 +146,7 @@ L5 risk), so each stage queries rather than re-parses.
    method* to what the scan found (playbook catalog) and lets you review/approve
    the approach after discovery before it runs (the L2 approach gate). Best for
    complex, heterogeneous estates.
-5. `skills/orchestrator/SKILL.md`, then the step skills in pipeline order.
+5. `.claude/skills/orchestrator/SKILL.md`, then the step skills in pipeline order.
 
 ## Running a modernization (conceptually)
 
@@ -166,6 +166,6 @@ See `input/target-spec.md` for the full, annotated template and
 ## Status
 
 This repository is the **design + skill specification** for the autopilot. The
-`architecture/` and `graph/` docs are the contracts; the `skills/*/SKILL.md`
+`architecture/` and `graph/` docs are the contracts; the `.claude/skills/*/SKILL.md`
 files are the executable instructions for each agent; `workflows/` and
 `recipes/` are scaffolded with the contracts and starter catalogs.

@@ -51,6 +51,13 @@ hypothesis with a confidence and a citation, never as ground truth.
   assertion text, and comments you cite. Per schema §6 you MUST NOT re-parse
   source to answer structural questions — query the graph for those; open
   source only to capture human-readable evidence behind a fact.
+- **Production traces** (required — Target Spec §1 `inputs.productionTraces`,
+  validated present at INTAKE): the recorded real request/response + event
+  traffic. Use it as behavioral evidence — observed inputs/outputs along each
+  `Flow` corroborate (or contradict) rules mined from code, and let you rank a
+  rule's confidence on what production actually does, not just what the code
+  says. The same traces are reused by the tester/replay for E2E equivalence, so
+  the capabilities/flows you anchor here become the journeys proven later.
 
 ## Outputs (L2 — all written, never mutating prior layers)
 
