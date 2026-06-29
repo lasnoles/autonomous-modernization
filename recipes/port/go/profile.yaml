@@ -1,0 +1,61 @@
+# Go target-language profile — used by transformation-compiler's `generate` rung
+# to synthesize idiomatic Go from the language-neutral spec (InterfaceContracts +
+# BusinessRules + Flows + characterization tests + replay cassettes).
+# A port's output is always a CANDIDATE, proven black-box via replay/E2E.
+# See architecture/multi-language-and-porting.md and recipes/port/README.md.
+
+language: go
+version: "1.22"
+
+moduleLayout: standard            # cmd/ internal/ pkg/ — std Go project layout
+goModule: "example.com/<svc>"     # module path; set per run from target.runtime
+
+idioms:
+  errors: "explicit error returns (error as last return value); wrap with fmt.Errorf(%w); no panics across boundaries"
+  nullability: "zero values + comma-ok; pointers only when absence is meaningful; no null"
+  di: "constructor functions (NewX(deps) *X); interfaces defined at the consumer; no annotations/reflection DI"
+  concurrency: "goroutines + channels; context.Context as first arg for cancellation/deadlines"
+  config: "env + flags; no global mutable state"
+  packages: "small, behavior-named (not layer-named); internal/ for non-exported"
+  apiStyle: "net/http handlers or chi router; explicit request/response structs"
+
+# source-lib → target intent (GUIDANCE, not a 1:1 transform; generator picks idiomatic Go)
+libMappings:
+  # Java sources
+  "spring-web|spring-boot-starter-web": "chi (github.com/go-chi/chi/v5) or net/http"
+  "spring-data-jpa|hibernate": "pgx (github.com/jackc/pgx/v5) + sqlc, or GORM"
+  "jackson|gson": "encoding/json"
+  "slf4j|log4j|logback": "log/slog"
+  "junit": "testing + testify (github.com/stretchr/testify)"
+  "spring-kafka": "segmentio/kafka-go or confluent-kafka-go"
+  "resilience4j": "context timeouts + sony/gobreaker"
+  # Python sources
+  "fastapi|flask|django(views)": "chi or net/http"
+  "sqlalchemy|django-orm": "pgx + sqlc, or GORM"
+  "pydantic": "structs + encoding/json (+ go-playground/validator)"
+  "celery": "a worker goroutine pool + a queue client (kafka-go / asynq)"
+  "requests|httpx": "net/http client"
+
+scaffold:                          # files the generator always emits per ported component
+  - "go.mod"
+  - "go.sum"
+  - "cmd/<svc>/main.go"            # wires deps + starts the server/worker
+  - "internal/<component>/<component>.go"
+  - "internal/<component>/<component>_test.go"   # ports of characterization tests
+  - "internal/<component>/contract_test.go"      # asserts the frozen InterfaceContract
+  - "Dockerfile"                  # for the devops Podman topology
+  - "Makefile"                    # build/test/lint targets
+
+# How the generated Go is proven (consumed by validation/replay/integration-verifier)
+equivalence: golden                # ports are validated black-box, never syntactically
+build:    "go build ./..."
+test:     "go test ./... -race -cover"
+coverage: "go test ./... -coverprofile=cover.out && go tool cover -func=cover.out"
+vulnScan: "govulncheck ./..."
+lint:     "staticcheck ./..."
+format:   "gofmt -w . && goimports -w ."
+
+# The frozen InterfaceContract is authoritative — the generated service must satisfy
+# the same external HTTP/queue/DB contract byte-for-byte at the boundary. Unknown
+# target-side libs/interfaces become placeholders + Gaps (open-question-resolution.md),
+# raising gapRisk — never silently guessed.

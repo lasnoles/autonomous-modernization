@@ -191,6 +191,40 @@ tools:
     optional: true
     usedBy: [validation]
 
+  # ── Go profile tools (active when source.language: go, OR as a PORT TARGET — ─
+  # target.language: go, e.g. Java→Go / Python→Go). Build/test/cover are built into
+  # the go toolchain; the generator emits Go per recipes/port/go/profile.yaml.
+  # Bound via architecture/language-profiles.md §2.
+  - id: go
+    version: "1.22"               # from target-spec target.runtime.goVersion
+    lang: go
+    purpose: "Go build/test/coverage toolchain (validate the generated/ported service)"
+    verify: "go version"
+    image: "docker.io/golang:1.22"
+    install: { brew: "go", apt: "golang-go", winget: "GoLang.Go" }
+    usedBy: [semantic-indexer, validation, transformation-compiler, devops]
+  - id: govulncheck
+    version: "1.x"
+    lang: go
+    purpose: "Go dependency/source vulnerability scan (govuln DB)"
+    verify: "govulncheck -version"
+    install: { go: "golang.org/x/vuln/cmd/govulncheck@latest" }
+    usedBy: [technical-debt]
+  - id: staticcheck
+    version: "2024.1.x"
+    lang: go
+    purpose: "Go static analysis / smells (SpotBugs-equivalent)"
+    verify: "staticcheck -version"
+    install: { go: "honnef.co/go/tools/cmd/staticcheck@2024.1.1", brew: "staticcheck" }
+    usedBy: [technical-debt]
+  - id: goimports
+    version: "0.x"
+    lang: go
+    purpose: "Go formatter / import organizer (gofmt + import fixups)"
+    verify: "goimports -h >/dev/null 2>&1 || echo goimports"
+    install: { go: "golang.org/x/tools/cmd/goimports@latest" }
+    usedBy: [transformation-compiler]
+
   # VALIDATE — build, coverage, mutation
   - id: jacoco
     version: "0.8.x"
