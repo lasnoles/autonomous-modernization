@@ -70,6 +70,18 @@ INTAKE → ⟦PREFLIGHT GATE⟧ → INDEX → RECOVER → DISCOVER → DEBT → 
    and continue from each repo/CU's persisted position. Otherwise mint a `runId`
    and start every repo at INTAKE.
 
+1a-lang. **Resolve the language profile (auto-routing).** For each repo, take
+   `source.language` from the Target Spec, or **detect** it from build files
+   (`pom.xml`/`build.gradle`→java, `pyproject.toml`/`requirements*.txt`→python,
+   `package.json`→typescript, `*.csproj`→csharp, `go.mod`→go). Load that profile
+   (`architecture/language-profiles.md`) — it binds the parser/resolver, build
+   systems, entry-point/ORM detectors, recipe engine, scanners, and test tools
+   every downstream stage will use. Record `language` + profile version in
+   provenance. A repo whose language has no profile → blocking Question (don't
+   guess a toolchain). `source.language != target.language` ⇒ this is a **port**:
+   route PLAN to emit `language-port` CUs (`generate` strategy) instead of
+   modernization recipes.
+
 1a-inputs. **Mandatory-input gate (at INTAKE, before exploring).** The Target
    Spec's `inputs:` block has two **required** inputs — `repoScan` (what INDEX
    scans) and `productionTraces` (the recorded prod traffic that grounds business
@@ -85,8 +97,10 @@ INTAKE → ⟦PREFLIGHT GATE⟧ → INDEX → RECOVER → DISCOVER → DEBT → 
 1a. **Preflight gate — verify all tools BEFORE exploring (hard gate).** After
    INTAKE and *before* INDEX (the first stage that reads/explores source), run tool
    preflight against `tooling/manifest.yaml` for **every required tool the run will
-   use** (verify → prefer container → adapt host install to the environment →
-   re-verify; pinned versions only). Do **not** enter INDEX until every required
+   use** — the language-agnostic tools **plus only the active profile's `lang`-tagged
+   tools** (so a Python run verifies LibCST/ruff/pip-audit/pytest, not Maven/
+   OpenRewrite) — (verify → prefer container → adapt host install to the
+   environment → re-verify; pinned versions only). Do **not** enter INDEX until every required
    (non-optional) tool passes `verify` at its pinned version — exploration must
    never start on a partial toolchain. Optional tools may be deferred, but log
    their absence. Any unresolved required tool → raise a **blocking Question** and

@@ -177,8 +177,8 @@ the orchestrator's transition, equivalence is validation's job (IR §7).
 
 | Situation | Rung | Engine |
 |-----------|------|--------|
-| A catalog recipe matches the CU `kind` and language | **recipe** | OpenRewrite (Java), ts-morph (TS/JS), Roslyn (C#) |
-| No catalog recipe, but the change is mechanical/AST-shaped | **codemod** | hand-written ts-morph program / Roslyn analyzer+codefix |
+| A catalog recipe matches the CU `kind` and language | **recipe** | OpenRewrite (Java), ts-morph (TS/JS), Roslyn (C#) — engine from the language profile |
+| No catalog recipe, but the change is mechanical/AST-shaped | **codemod** | hand-written ts-morph / Roslyn fix; **LibCST / pyupgrade / ruff / django-upgrade (Python)** |
 | Change needs judgment (ambiguous refactor, business-aware edit) and no deterministic rung applies | **llm-patch** | patch-generator prompt, candidate only |
 | CU `kind == language-port` (cross-language, e.g. Java→Go) — no AST recipe can translate languages | **generate** | spec-driven synthesis: emit target-language source from InterfaceContracts + BusinessRules + Flows + characterization tests + replay cassettes + target idiom profile (`recipes/port/<lang>/`). Candidate only; proven black-box via replay. See `architecture/multi-language-and-porting.md`. |
 | Change is unsafe to automate or under-specified | **manual** | structured hand-off, no auto-diff |
@@ -233,9 +233,16 @@ Rules of thumb:
 
 ## Recipe catalog contract
 
-Each `recipes/<engine>/` folder (`openrewrite/`, `ts-morph/`, `roslyn/`,
-`llm-fallback/`) is a catalog the planner *names* and the compiler *runs*. So the
-two agree, every catalog entry declares:
+The transformation **engine is chosen by the active language profile**
+(`architecture/language-profiles.md` → `recipeEngine`): OpenRewrite for `java`,
+ts-morph for `typescript`, Roslyn for `csharp`, **LibCST/ruff/pyupgrade for
+`python`**. Python has no OpenRewrite-class recipe engine, so most Python CUs
+start at the **`codemod`** rung and drop to `llm-patch` sooner than Java — the
+ladder is unchanged, only the entry rung differs.
+
+Each `recipes/<engine>/` folder (`openrewrite/`, `python/`, `ts-morph/`,
+`roslyn/`, `llm-fallback/`) is a catalog the planner *names* and the compiler
+*runs*. So the two agree, every catalog entry declares:
 
 | Field | Meaning |
 |-------|---------|
@@ -250,6 +257,8 @@ two agree, every catalog entry declares:
 - `openrewrite/` — Java AST recipes (e.g. `JavaxToJakarta`, Spring Boot 2→3
   migration, `UpgradeJavaVersion`, dependency-upgrade recipes from the
   `rewrite-recipe-bom`).
+- `python/` — LibCST codemods + `pyupgrade`/`ruff`/`django-upgrade` fixers
+  (syntax upgrade, API/import rewrite, unittest→pytest, Django migrations).
 - `ts-morph/` — TypeScript/JavaScript codemod programs (rename, signature/API
   migration, import rewrite).
 - `roslyn/` — C# analyzers + code-fix providers and `dotnet format` rule sets.

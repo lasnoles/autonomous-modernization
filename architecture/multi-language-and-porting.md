@@ -1,10 +1,18 @@
 # Multi-Language Support & Cross-Language Porting (e.g. Java → Go)
 
+> **Language routing is profile-driven.** Both kinds of work below select their
+> tools from the declared `source.language`'s profile
+> (`architecture/language-profiles.md`). Java and **Python** are the two reference
+> profiles; TypeScript/C#/Go are stubs. The two paths:
+
 The system distinguishes two kinds of work:
 
 - **Modernization** — *same language*, newer version/framework (Java 8 → Java 21,
-  Spring Boot 1 → 3). Handled by deterministic AST recipes (OpenRewrite /
-  ts-morph / Roslyn). This is the default path everywhere else in the design.
+  Spring Boot 1 → 3; **Python 3.8 → 3.12, Flask → FastAPI, Django 3 → 5**).
+  Handled by the profile's deterministic engine — AST recipes for Java
+  (OpenRewrite) / TS (ts-morph) / C# (Roslyn), **codemods for Python (LibCST +
+  pyupgrade/ruff/django-upgrade)**. This is the default path everywhere else in
+  the design.
 - **Porting** — *change of language/runtime* (Java → Go, .NET → Java, …). AST
   recipes **cannot** do this: there is no syntactic rewrite from Java to Go. A
   port is a **behavior-preserving regeneration**, validated black-box.

@@ -38,7 +38,11 @@ Read these contracts before acting and treat them as authoritative:
 > **Tools (preflight):** the repo's pinned JDK + build tool (set at INTAKE) plus
 > JaCoCo (and optional PIT) from `tooling/manifest.yaml`
 > (`architecture/tooling-and-provisioning.md`). Build with the pinned toolchain,
-> verified — never the worker default.
+> verified — never the worker default. **Build/test/coverage/mutation tools come
+> from the active language profile** (`architecture/language-profiles.md` →
+> `test.*`): **`java`** = maven/gradle + JUnit + JaCoCo (+ PIT); **`python`** =
+> pytest (tox/nox) + coverage.py (+ mutmut). The equivalence levels and the
+> `gate` contract are identical across languages — only the runner differs.
 
 ## When to use
 

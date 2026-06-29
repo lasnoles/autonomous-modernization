@@ -14,6 +14,12 @@
 
 manifestVersion: "1.0"
 
+# Tools tagged `lang: <language>` belong to that language's PROFILE
+# (`architecture/language-profiles.md`). At INTAKE the PREFLIGHT gate resolves the
+# active `source.language`, then verifies the language-agnostic tools PLUS only the
+# `lang`-matching ones — so a Python run never tries to install Maven/OpenRewrite,
+# and a Java run never installs LibCST. Untagged tools apply to every language.
+
 defaults:
   runtime: container            # container | host  — prefer container when available
   onMissing: install-pinned     # install the pinned version, then re-verify
@@ -26,19 +32,40 @@ defaults:
 buildToolchain:
   - id: jdk
     version: "21"               # from target-spec target.runtime.java
+    lang: java
     verify: "java -version"
     image: "docker.io/eclipse-temurin:21-jdk"
     usedBy: [validation, transformation-compiler, devops]
   - id: maven
     version: "3.9.x"
+    lang: java
     verify: "mvn -v"
     image: "docker.io/maven:3.9-eclipse-temurin-21"
     usedBy: [validation, transformation-compiler]
   - id: gradle
     version: "8.x"
+    lang: java
     verify: "gradle -v"
     image: "docker.io/gradle:8-jdk21"
     usedBy: [validation, transformation-compiler]
+  # Python build toolchain (active when source.language: python — language-profiles.md)
+  - id: python
+    version: "3.12"             # from target-spec target.runtime.python
+    lang: python
+    verify: "python --version"
+    image: "docker.io/python:3.12-slim"
+    usedBy: [semantic-indexer, validation, transformation-compiler, devops]
+  - id: poetry
+    version: "1.8.x"
+    lang: python
+    verify: "poetry --version"
+    install: { pipx: "poetry==1.8.*", brew: "poetry" }
+    usedBy: [semantic-indexer, validation, transformation-compiler]
+  - id: pip
+    version: "24.x"
+    lang: python
+    verify: "pip --version"
+    usedBy: [semantic-indexer, validation, transformation-compiler]
 
 # ── Agent capability tools (the system's own tooling) ───────────────────────
 tools:
@@ -46,7 +73,7 @@ tools:
   - id: tree-sitter
     version: "0.21"
     purpose: "multi-language parsing for the semantic indexer"
-    grammars: ["java@0.21", "go@0.21", "typescript@0.21", "c-sharp@0.21"]
+    grammars: ["java@0.21", "python@0.21", "go@0.21", "typescript@0.21", "c-sharp@0.21"]
     verify: "tree-sitter --version"
     install: { npm: "tree-sitter-cli@0.21", brew: "tree-sitter", apt: "tree-sitter" }
     usedBy: [semantic-indexer]
@@ -72,6 +99,97 @@ tools:
     usedBy: [transformation-compiler]
   # NOTE: the cross-language `generate` strategy (language-port) uses the LLM,
   # not a binary — no tool entry; its target-language profile lives in recipes/port/.
+
+  # ── Python profile tools (active when source.language: python) ──────────────
+  # Bound to pipeline stages via architecture/language-profiles.md §2.
+  - id: pyright
+    version: "1.1.x"
+    lang: python
+    purpose: "Python symbol/type resolution for the indexer (dynamic-typing: edges < 1.0)"
+    verify: "pyright --version"
+    install: { npm: "pyright@1.1", pipx: "pyright" }
+    usedBy: [semantic-indexer]
+  - id: jedi
+    version: "0.19.x"
+    lang: python
+    purpose: "lightweight name/def resolution (alt/complement to pyright)"
+    verify: "python -c \"import jedi; print(jedi.__version__)\""
+    install: { pip: "jedi==0.19.*" }
+    optional: true
+    usedBy: [semantic-indexer]
+  - id: libcst
+    version: "1.5.x"
+    lang: python
+    purpose: "lossless CST codemods — primary Python transform engine"
+    verify: "python -c \"import libcst; print(libcst.__version__)\""
+    install: { pip: "libcst==1.5.*" }
+    usedBy: [transformation-compiler]
+  - id: pyupgrade
+    version: "3.x"
+    lang: python
+    purpose: "syntax upgrades to a target Python version"
+    verify: "pyupgrade --version"
+    install: { pipx: "pyupgrade", pip: "pyupgrade" }
+    usedBy: [transformation-compiler]
+  - id: ruff
+    version: "0.6.x"
+    lang: python
+    purpose: "lint autofix + formatter (recipe rung + formatter)"
+    verify: "ruff --version"
+    install: { pipx: "ruff", brew: "ruff" }
+    usedBy: [transformation-compiler, technical-debt]
+  - id: django-upgrade
+    version: "1.x"
+    lang: python
+    purpose: "Django version-specific migrations"
+    verify: "django-upgrade --version"
+    install: { pipx: "django-upgrade" }
+    optional: true
+    usedBy: [transformation-compiler]
+  - id: pip-audit
+    version: "2.x"
+    lang: python
+    purpose: "PyPI dependency vulnerability scan (OSV-backed)"
+    verify: "pip-audit --version"
+    install: { pipx: "pip-audit" }
+    usedBy: [technical-debt]
+  - id: bandit
+    version: "1.7.x"
+    lang: python
+    purpose: "Python security static analysis (find-sec-bugs equivalent)"
+    verify: "bandit --version"
+    install: { pipx: "bandit", pip: "bandit" }
+    usedBy: [technical-debt]
+  - id: vulture
+    version: "2.x"
+    lang: python
+    purpose: "dead-code detection"
+    verify: "vulture --version"
+    install: { pipx: "vulture" }
+    optional: true
+    usedBy: [technical-debt]
+  - id: pytest
+    version: "8.x"
+    lang: python
+    purpose: "Python test runner (JUnit equivalent)"
+    verify: "pytest --version"
+    install: { pip: "pytest==8.*" }
+    usedBy: [validation, tester]
+  - id: coverage-py
+    version: "7.x"
+    lang: python
+    purpose: "changed-code coverage (JaCoCo equivalent)"
+    verify: "coverage --version"
+    install: { pip: "coverage==7.*" }
+    usedBy: [validation]
+  - id: mutmut
+    version: "2.x"
+    lang: python
+    purpose: "optional mutation testing (equivalence strength; PIT equivalent)"
+    verify: "mutmut version"
+    install: { pipx: "mutmut" }
+    optional: true
+    usedBy: [validation]
 
   # VALIDATE — build, coverage, mutation
   - id: jacoco
