@@ -1,0 +1,54 @@
+# Seam-extraction workflow.
+# Specialization of strangler-fig for `kind: seam-extraction` ChangeUnits —
+# extracting a component behind an indirection so old and new can coexist and
+# cutover is incremental and O(1)-reversible. Always requires human review
+# (requireHumanFor) and an O(1) rollback (flag flip / route change).
+
+apiVersion: modernization/v1
+kind: Workflow
+metadata:
+  name: seam-extraction
+  description: Introduce a strangler-fig seam, route a slice of traffic to the new path, verify equivalence, expand.
+
+inputs:
+  seam: { type: object, required: true }          # IR seam (boundary, seamKind, routing, cutover, rollback)
+  changeUnit: { type: object, required: true }
+
+preconditions:
+  - extractabilityScore: ">= 0.6"                  # from architecture-recovery
+  - rollbackIsO1: true                             # flag flip / route change only
+  - humanApproval: required
+
+stages:
+  - id: introduce-indirection
+    description: Add the seam abstraction without behavior change.
+    seamKind: "{{ seam.seamKind }}"               # interface-facade | http-proxy | event-bridge | feature-flag | branch-by-abstraction
+    skill: transformation-compiler
+    equivalence: behavioral
+    guard: { noBehaviorChange: true }
+
+  - id: build-new-path
+    description: Implement the modernized component behind the seam (default-off).
+    skill: transformation-compiler
+    routing: { mechanism: "{{ seam.routing.mechanism }}", default: v1 }
+
+  - id: shadow-verify
+    description: Run new path in shadow; diff outputs vs old path via replay.
+    skill: replay
+    equivalence: golden
+    guard: { divergence: none }
+
+  - id: incremental-cutover
+    description: Progressively shift traffic v1 → v2 with monitoring.
+    steps: [1%, 10%, 50%, 100%]
+    monitor: { slo: [latency, errorRate, businessKPIs] }
+    onBreach: { subWorkflow: rollback }            # flip flag back to v1
+
+  - id: retire-old-path
+    description: After 100% stable, remove old implementation (separate CU).
+    requiresHumanApproval: true
+
+rollback:
+  mechanism: flip-flag-to-v1
+  cost: O(1)
+events: { emitOn: every-transition, sink: run-event-store }

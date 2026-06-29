@@ -1,0 +1,37 @@
+# Playbook: characterization-first.
+# Selected by the planner when a scope's changed-code coverage is below the floor
+# (thin tests). Captures the BASELINE behavior as a phase BEFORE any
+# transformation, so equivalence is provable, then runs the inner playbook
+# (usually strangler-fig). A prefix playbook — it composes.
+# See architecture/execution-playbooks.md.
+
+apiVersion: modernization/v1
+kind: Workflow
+meta:
+  playbook: true
+  selector: "changed-code coverage < coverageFloor"
+metadata:
+  name: characterization-first
+  description: Pin existing behavior with characterization tests + replay traces first, then transform.
+
+inputs:
+  changeUnit: { type: object, required: true }
+  inner: { type: string, default: strangler-fig }   # playbook to run after characterization
+
+phases:
+  - id: capture-baseline
+    description: Record current behavior of the scope BEFORE touching it.
+    roles: [tester, replay]
+    steps:
+      - replay: record production traces / exercise baseline (cassettes)
+      - tester: generate characterization tests against the BASELINE (must pass green on baseline)
+    guard: { baselineGreen: true, changedScopeCovered: ">= coverageFloor" }
+    # Now the scope is covered, so the inner playbook's validation can prove equivalence.
+
+  - id: transform
+    description: Run the inner playbook for the actual change.
+    subWorkflow: "{{ inputs.inner }}"
+    with: { changeUnit: "{{ changeUnit }}" }
+
+rollback: inherits-from-inner            # the characterization phase makes no production change
+events: { emitOn: every-transition, sink: run-event-store }

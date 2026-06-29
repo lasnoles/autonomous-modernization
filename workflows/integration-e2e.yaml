@@ -1,0 +1,83 @@
+# Integration & end-to-end verification workflow.
+# Invoked by the INTEGRATE stage of modernization.yaml, owned by the
+# `integration-verifier` skill. Stands up the whole system (migrated service +
+# dependents, real or mock) under Podman with monitoring, runs E2E scenarios
+# built from production traces, reads the monitoring signals, and certifies that
+# the end-to-end system works. See architecture/integration-and-environments.md.
+
+apiVersion: modernization/v1
+kind: Workflow
+metadata:
+  name: integration-e2e
+  description: Bring the full system up under Podman, replay production journeys end-to-end, prove it works.
+
+inputs:
+  repos: { type: list, required: true }        # one or more migrated repos to compose
+  appliedChangeUnits: { type: list, required: true }
+  slos: { type: object, required: false }      # from Target Spec; gates pass/fail
+
+stages:
+  - id: provision
+    role: devops
+    skill: devops
+    action: bring-up-topology
+    runtime: podman                            # rootless; podman play kube / podman-compose
+    brings:
+      service: each migrated repo (container image, pinned toolchain)
+      dependents:                              # from graph ExternalSystem facts
+        known:       official images + seeded fixtures
+        placeholder: mock service container built to the placeholder InterfaceContract
+      observability: [ otel-collector, prometheus, grafana, loki ]
+    guard: { allHealthChecksGreen: true }
+
+  - id: mocks
+    role: tester
+    skill: tester
+    action: load-interface-mocks
+    fidelity:
+      known:       generated-from-spec-or-recorded-cassette   # WireMock/Mountebank/Testcontainers
+      placeholder: built-to-placeholder-contract (labeled with Gap)
+    invariant: every external dependency has a real backend OR a mock — no dangling integration
+
+  - id: scenarios
+    role: tester
+    skill: tester
+    action: build-e2e-from-production-traces
+    source: replay-cassettes                   # captured by the replay skill
+    produces: E2EScenario nodes (VERIFIES capabilities/endpoints)
+    determinism: control clock/random/uuid seams
+
+  - id: run-e2e
+    role: integration-verifier
+    skill: integration-verifier
+    action: replay-production-journeys-end-to-end
+    across: all composed services (cross-repo journeys included)
+    assert:
+      behavioralEquivalence: vs baseline outputs
+      noNewErrors: true
+
+  - id: observe
+    role: integration-verifier
+    action: read-monitoring
+    checks: [ errorRate, latency, businessKPIs ]
+    against: "{{ inputs.slos }}"
+    onBreach: { result: fail }
+
+  - id: certify
+    role: integration-verifier
+    action: certify-system-works
+    pass-if:                                    # mirrors state-machine §9
+      - topologyHealthy: true
+      - e2eEquivalenceGreen: true
+      - slosMet: true
+      - noDanglingIntegration: true
+      - noBlockingGaps: true
+    onFail: { feedback: planner, orElse: { subWorkflow: rollback } }
+
+outputs:
+  e2eReport: artifacts/<run>/e2e-report.md
+  environmentManifest: artifacts/<run>/environment.yaml
+  gapsTouched: artifacts/<run>/gaps.md
+
+teardown: podman-down (ephemeral env; manifests retained for audit/repro)
+events: { emitOn: every-transition, sink: run-event-store }

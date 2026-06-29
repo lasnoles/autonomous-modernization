@@ -1,0 +1,166 @@
+# environment.yaml — rendered by the `devops` role from graph ExternalSystem facts
+# Run:    run_2026_06_28_001  (billing-jakarta-payments-2026q3)
+# Engine: rootless Podman  ·  podman-compose -f environment.yaml up
+# Stage:  INTEGRATE  ·  certified by the integration-verifier role
+#
+# Topology: migrated billing-svc + real dependents (postgres, rabbitmq) +
+# one PLACEHOLDER mock for the unknown payment provider (GAP-007), plus a full
+# observability stack. A dedicated podman network isolates the environment and
+# every service carries a healthcheck so readiness is deterministic.
+
+version: "3.9"
+
+networks:
+  billing-e2e-net:
+    driver: bridge
+    # Dedicated, isolated network for this environment (one per run).
+
+volumes:
+  pgdata: {}
+  prometheus-data: {}
+  grafana-data: {}
+  loki-data: {}
+
+services:
+
+  # --- Migrated service under test ---------------------------------------
+  billing-svc:
+    image: localhost/billing-svc:run-2026-06-28-001
+    networks: [billing-e2e-net]
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: "e2e"
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres:5432/billing"
+      SPRING_DATASOURCE_USERNAME: "billing"
+      SPRING_DATASOURCE_PASSWORD: "billing"
+      SPRING_RABBITMQ_HOST: "rabbitmq"
+      SPRING_RABBITMQ_PORT: "5672"
+      # Payments seam (CU-021): shadow-only against the placeholder mock,
+      # production traffic stays on the v1 path. Flag DEFAULT-OFF.
+      PAYMENTS_SEAM_ENABLED: "false"
+      PAYMENTS_PROVIDER_BASEURL: "http://mock-payment-provider:9090"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+      OTEL_SERVICE_NAME: "billing-svc"
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      mock-payment-provider: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
+  # --- Real dependents (official images, seeded with fixtures) -----------
+  postgres:
+    image: docker.io/postgres:16
+    networks: [billing-e2e-net]
+    environment:
+      POSTGRES_DB: "billing"
+      POSTGRES_USER: "billing"
+      POSTGRES_PASSWORD: "billing"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Seed fixtures so E2E scenarios replay against realistic data.
+      - ./fixtures/billing.sql:/docker-entrypoint-initdb.d/billing.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U billing -d billing"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+  rabbitmq:
+    image: docker.io/rabbitmq:3-management
+    networks: [billing-e2e-net]
+    ports:
+      - "15672:15672"   # management UI
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # --- PLACEHOLDER mock: external payment provider (GAP-007) -------------
+  # The real provider's API is UNKNOWN. The tester role built this mock to the
+  # placeholder InterfaceContract; it returns plausible typed responses and is
+  # loudly labeled with its gap. Integration is NOT skipped — there is always
+  # something at the other end of the wire. See wiki/gaps/GAP-007.md.
+  mock-payment-provider:
+    image: localhost/mock-payment-provider:run-2026-06-28-001
+    networks: [billing-e2e-net]
+    ports:
+      - "9090:9090"
+    labels:
+      gap: "GAP-007"
+      placeholder: "true"
+      interface: "InterfaceContract:payment-provider"
+      note: "PLACEHOLDER mock for unknown payment-provider API (GAP-007)"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/__admin/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  # --- Observability stack (OTel → Prometheus / Loki / Grafana) ----------
+  otel-collector:
+    image: docker.io/otel/opentelemetry-collector
+    networks: [billing-e2e-net]
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:13133/"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  prometheus:
+    image: docker.io/prom/prometheus
+    networks: [billing-e2e-net]
+    ports:
+      - "9091:9090"
+    # Scrapes billing-svc Micrometer/Actuator metrics for the SLO panels.
+    scrape:
+      - billing-svc   # http://billing-svc:8080/actuator/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  grafana:
+    image: docker.io/grafana/grafana
+    networks: [billing-e2e-net]
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    dashboards:
+      - billing-e2e   # SLO panels: p95 latency, error rate, invoice throughput
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+  loki:
+    image: docker.io/grafana/loki
+    networks: [billing-e2e-net]
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki-data:/loki
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3100/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s

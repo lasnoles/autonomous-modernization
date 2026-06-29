@@ -1,0 +1,140 @@
+# Master modernization workflow.
+# Declarative binding of the repo state machine (architecture/orchestration-
+# state-machine.md) to skill invocations. The `orchestrator` skill executes
+# this. Each stage maps to a skill and a graph layer; guards must pass before
+# the next stage runs.
+
+apiVersion: modernization/v1
+kind: Workflow
+metadata:
+  name: modernization
+  description: End-to-end analyze → plan → transform → validate → apply pipeline.
+
+# Inputs are populated by the orchestrator from the run's Target Spec
+# (input/<run>.md §1, template input/target-spec.md) — the source of truth for
+# intent. Values below are the fallback defaults when the spec omits them.
+inputs:
+  repos: { type: list, required: true }              # from spec scope.repos
+  objective: { type: string, required: true }        # from spec scope.objective
+  constraints: { type: list, default: [] }           # from spec scope.constraints (HARD)
+  environment: { type: enum, values: [dry-run, shadow, staged, prod-rollout], default: staged }
+
+autonomy:
+  autoApplyCeiling: 0.4
+  pauseAboveCeiling: true            # middle band (ceiling < risk < blockAbove) → PAUSED (matches IR gates.risk)
+  blockAbove: 0.8
+  requireHumanFor: [seam-extraction, security-fix]
+  approachGate: review              # auto | review (surface if any non-default playbook) | always — execution-playbooks.md §4
+
+concurrency:
+  maxRepos: 4
+  maxCUsPerRepo: 6
+
+# ── Repo machine ────────────────────────────────────────────────
+stages:
+  - id: intake
+    state: INTAKE
+    action: clone-refresh-pin-toolchain
+    onError: pause
+
+  - id: index
+    state: INDEX
+    skill: semantic-indexer
+    writes: L0
+    guard:
+      graphLayerWritten: L0
+      status: ok
+      entryPointInventoryComplete: true   # ALL entry-point classes enumerated (no single front door)
+      flowTracedForEveryEntryPoint: true  # one Flow per non-synthetic entry point (L0); zero-flow = Gap
+
+  - id: recover
+    state: RECOVER
+    skill: architecture-recovery
+    reads: [L0]
+    writes: L1
+    guard: { graphLayerWritten: L1, status: ok }
+
+  - id: discover
+    state: DISCOVER
+    skill: business-discovery
+    reads: [L0, L1]
+    writes: L2
+    guard:
+      graphLayerWritten: L2
+      status: ok
+      everyFlowMappedToCapability: true   # each L0 Flow attributed to a capability/rules (read, not re-traced)
+
+  - id: debt
+    state: DEBT
+    skill: technical-debt
+    reads: [L0, L1]
+    writes: L3
+    guard: { graphLayerWritten: L3, status: ok }
+
+  - id: plan
+    state: PLAN
+    skill: planner
+    reads: [L0, L1, L2, L3]
+    writes: L4
+    emits: [ modernization-ir, approach-proposal ]   # selects an execution playbook per CU/wave
+    guard: { irValid: true, everyChangeUnitHasPlaybook: true }
+
+  - id: approach-gate
+    state: APPROACH_GATE              # between PLAN and EXECUTE (execution-playbooks.md §4)
+    gate: "{{ autonomy.approachGate }}"   # auto | review | always
+    surfaceWhen:                      # review → surface only if a non-default playbook was chosen
+      review: "ir.approach.selections has any playbook != strangler-fig"
+      always: true
+      auto: false
+    onSurface: { raiseQuestion: approach-proposal, wait: true }   # waits for approve/redirect
+    onApprove: { set: "ir.approach.status = approved" }
+    onRedirect: { to: plan }          # planner re-selects playbooks
+    guard: { approachApproved: true }
+
+  - id: execute
+    state: EXECUTE
+    # Fans out the ChangeUnit machine per CU, wave by wave.
+    # Each CU is delivered by collaborating roles (see state-machine §8):
+    roles:
+      developer: { skill: developer }   # finish/wire change, incl. against placeholders
+      devops:    { skill: devops }      # build service + dependents as Podman, monitoring
+      tester:    { skill: tester }      # interface mocks + prod-trace E2E scenarios
+    subWorkflow: "{{ changeUnit.playbook }}"   # dispatch through the CU's selected playbook (default strangler-fig)
+    forEach: { wave: ir.waves, changeUnit: wave.changeUnits }
+    with: { changeUnit: "{{ changeUnit }}", seam: "{{ changeUnit.seamRef }}", autonomy: autonomy }
+    guard: { allCUsTerminal: true }
+
+  - id: integrate
+    state: INTEGRATE
+    skill: integration-verifier
+    subWorkflow: integration-e2e
+    with: { repos: inputs.repos, appliedChangeUnits: "{{ ir.appliedChangeUnits }}", slos: "{{ spec.acceptance.slos }}" }
+    # Stand up the full system (Podman) + monitoring, run E2E from prod traces.
+    guard:                              # exit criteria — "the system works" (state-machine §9)
+      topologyHealthy: true
+      e2eEquivalenceGreen: true
+      slosMet: true
+      noDanglingIntegration: true       # every dep has a real backend or labeled mock
+      noBlockingGaps: true
+
+  - id: complete
+    state: COMPLETE
+    action: emit-run-report-and-audit-manifest
+    includes: [ okf-run-wiki, gaps-register, e2e-report, environment-manifest, tokens-report ]
+
+# ── Observability, resume & cost (run-state-observability.md) ────
+events:
+  emitOn: every-transition          # see state-machine §4; each event carries tokens
+  sink: run-event-store
+observability:
+  historian: { skill: run-historian, on: every-transition }   # folds events into the OKF wiki
+  artifacts:
+    okfWiki: wiki/<runId>/           # index.md (=STATUS.md) + log.md (=state machine) + concept pages
+    status: { human: wiki/<runId>/index.md, machine: status.json }
+    tokens: wiki/<runId>/tokens.md   # rollup step → CU → stage → repo → run
+  liveConsole: "modernize watch <runId>"
+  alertOn: [ PAUSED, BLOCKED, NEEDS_HUMAN, ROLLED_BACK, FAILED ]
+resume:
+  resumable: true
+  command: "modernize run --resume <runId>"
+  guarantees: [ no-recompute-unchanged, no-duplicate-apply, tokens-accumulate-across-restarts ]

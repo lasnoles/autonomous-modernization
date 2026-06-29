@@ -1,0 +1,39 @@
+# Playbook: dependency-untangle.
+# Selected by the planner when a scope sits on a dependency cycle or coupling
+# above the cap that would make the intended change unsafe. Breaks the cycle via
+# branch-by-abstraction FIRST, then runs the inner change. A prefix playbook.
+# See architecture/execution-playbooks.md.
+
+apiVersion: modernization/v1
+kind: Workflow
+meta:
+  playbook: true
+  selector: "scope on a dependency cycle OR component coupling > cap"
+metadata:
+  name: dependency-untangle
+  description: Break the blocking cycle/coupling with branch-by-abstraction, then make the intended change.
+
+inputs:
+  changeUnit: { type: object, required: true }
+  cycle: { type: object, required: false }          # the cycle/edges to break (from L1)
+  inner: { type: string, default: strangler-fig }
+
+phases:
+  - id: introduce-abstraction
+    description: Insert a branch-by-abstraction seam at the cycle edge (behavior-preserving).
+    role: developer
+    equivalence: behavioral
+    guard: { noBehaviorChange: true, cycleBroken: true }   # re-query L1: cycle gone
+
+  - id: transform
+    description: Now-decoupled, run the inner playbook for the actual change.
+    subWorkflow: "{{ inputs.inner }}"
+    with: { changeUnit: "{{ changeUnit }}" }
+
+  - id: collapse-abstraction
+    description: Optionally remove the abstraction once the change lands (separate CU).
+    optional: true
+    requiresHumanApproval: false
+
+rollback: revert-abstraction              # O(1)-ish: remove the introduced indirection
+events: { emitOn: every-transition, sink: run-event-store }
