@@ -48,7 +48,7 @@ L5 risk), so each stage queries rather than re-parses.
 | `.claude/skills/` | The agent skills — `orchestrator` (the control layer) plus one per pipeline step. Each has a `SKILL.md`. Lives under `.claude/` so Claude Code auto-discovers them. |
 | `prompts/` | LLM prompt templates (planner, reviewer, architect, test-generator, patch-generator). |
 | `workflows/` | Declarative pipelines binding the state machine to skills (`modernization`, `strangler-fig`, `seam-extraction`, `rollback`). |
-| `recipes/` | The transformation catalogs the compiler draws from (OpenRewrite, ts-morph, Roslyn, llm-fallback, port profiles). |
+| `recipes/` | The transformation catalogs the compiler draws from (OpenRewrite, **python** (LibCST/ruff/pyupgrade), ts-morph, Roslyn, llm-fallback, port profiles). |
 | `tooling/` | `manifest.yaml` — the pinned list of tools each stage needs + how to verify them. Resolved at INTAKE by preflight (`architecture/tooling-and-provisioning.md`); portable across environments, never floating versions. |
 
 ## The skills
@@ -83,12 +83,18 @@ L5 risk), so each stage queries rather than re-parses.
   (hash-gated, cached) — never whole files. Indexing shards per module, loads
   subgraphs lazily, and runs each stage as a bounded subagent. See
   `architecture/scalability-and-retrieval.md`.
-- **Multiple languages, including ports.** Same-language modernization uses AST
-  recipes; a change of language (e.g. **Java→Go**) is a `language-port` ChangeUnit
-  that *regenerates* the component from its language-neutral spec (rules, flows,
-  contracts, replay traces) and proves equivalence **black-box** at the interface
-  — the same replay/E2E machinery, now comparing two languages. See
-  `architecture/multi-language-and-porting.md`.
+- **Multiple languages via profiles.** Declare `source.language` (java, python,
+  typescript, csharp, go) and INTAKE loads that **language profile**, auto-routing
+  every stage to the right parser, resolver, entry-point/ORM detectors, recipe
+  engine, scanners, and test tools — no per-language fork of the skills. Adding a
+  language is one profile + tool entries. See `architecture/language-profiles.md`
+  (Java and **Python** are the two reference profiles).
+- **Including cross-language ports.** Same-language modernization uses AST
+  recipes/codemods; a change of language (e.g. **Java→Go**, **Python→Go**) is a
+  `language-port` ChangeUnit that *regenerates* the component from its
+  language-neutral spec (rules, flows, contracts, replay traces) and proves
+  equivalence **black-box** at the interface — the same replay/E2E machinery, now
+  comparing two languages. See `architecture/multi-language-and-porting.md`.
 
 ## Discovery, monitoring, resume & the run wiki
 

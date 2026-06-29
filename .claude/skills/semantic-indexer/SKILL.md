@@ -26,6 +26,14 @@ contracts before acting and treat them as authoritative:
 - `graph/node-types.md` — L0 node `kind`s and required `props`
 - `graph/edge-types.md` — L0 edge `type`s and required `props`
 - `architecture/system-design.md` — where you sit in the flow (§5 step 1)
+- `architecture/language-profiles.md` — **the language plugin you run as.** The
+  active `source.language` profile binds your parser grammar, symbol/type
+  resolver, build systems, dependency manifests, entry-point detectors, and
+  data-access detectors. Everything language-specific below is the **`java`
+  profile's** bindings; under `source.language: python` you run the **`python`
+  profile** instead (tree-sitter-python + Jedi/Pyright; FastAPI/Flask/Django +
+  Celery/APScheduler/click entry points; SQLAlchemy/Django-ORM/DB-API data access)
+  — same L0 schema out.
 
 > **Tools (preflight):** requires `tree-sitter` (+ grammars) and the symbol
 > resolver at their pinned versions — resolved at INTAKE from `tooling/manifest.yaml`
@@ -66,6 +74,16 @@ envelope (type, from, to, props, provenance). Resolved facts get
 `confidence < 1.0`.
 
 ## Procedure
+
+> **Run as the active language profile.** Read `source.language`'s profile
+> (`architecture/language-profiles.md`) and use *its* grammar, resolver, build
+> systems, dependency manifests, and entry-point/data-access detectors. The
+> concrete Maven/JPA/Spring references in the steps below are the **`java`**
+> profile; for `python` substitute the `python` profile's bindings (poetry/pip +
+> `pyproject.toml`/`requirements*`; FastAPI/Flask/Django/Celery/click entry
+> points; SQLAlchemy/Django-ORM/DB-API). For dynamically-typed languages, honor
+> `profile.indexer.typing: dynamic` — emit inferred call/dataflow edges at
+> `confidence < 1.0` (the resolver named in provenance), never a fake 1.0.
 
 > **Index in bounded batches — never hold a repo (or its dependency set) in
 > context.** This is the hard rule for large multi-repo runs

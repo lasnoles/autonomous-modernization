@@ -95,11 +95,15 @@ ChangeUnit `props` mirror the IR 1:1 (node-types.md §L4).
      several CUs joined by `PRECEDES`;
    - can be reverted on its own without stranding another CU.
 
-4. **Assign a strategy (recipe preferred, llm-patch fallback).** Honor
-   deterministic-first (system-design §2.1). For each CU set
+4. **Assign a strategy (deterministic preferred, llm-patch fallback).** Honor
+   deterministic-first (system-design §2.1) and draw recipe ids from the active
+   language profile's engine + catalog (`architecture/language-profiles.md` →
+   `recipeEngine`/`recipeCatalog`): `recipes/openrewrite/` for **java**,
+   `recipes/python/` (LibCST/ruff/pyupgrade) for **python**, etc. For each CU set
    `strategy.preferred`:
-   - `recipe` when a named AST recipe exists (e.g.
-     `openrewrite:org.openrewrite.java.migrate.jakarta.JavaxToJakarta`) — the
+   - `recipe`/`codemod` when a named transform exists in the profile's catalog
+     (java e.g. `openrewrite:…JavaxToJakarta`; python e.g.
+     `python:pyupgrade.to-py312`, `python:libcst.rename-symbol`) — the
      default for migrations/upgrades;
    - `codemod`/`manual` for mechanical or genuinely bespoke edits;
    - `llm-patch` only when no recipe covers it.

@@ -52,13 +52,29 @@ scope:
     - "Frontend redesign."
     - "Database engine change."
 
+source:
+  language: java                               # java | python | typescript | csharp | go
+                                               # Declares the source language → INTAKE loads that
+                                               # language PROFILE and auto-routes every stage's tools
+                                               # (parser, resolver, entry-point/ORM detectors, recipe
+                                               # engine, scanners, test/coverage). Omit → INTAKE detects
+                                               # from build files. See architecture/language-profiles.md.
+                                               # e.g. `python` → tree-sitter-python + Jedi/Pyright,
+                                               # FastAPI/Django/Flask + SQLAlchemy/ORM detectors,
+                                               # LibCST/ruff recipes, pip-audit/bandit, pytest+coverage.py.
+
 target:
-  language: java                               # SAME language → modernization (AST recipes).
-                                               # DIFFERENT language → a port (e.g. `go`); see below.
-  runtime:                                     # the platform end-state
-    java: "21"
+  language: java                               # == source.language → MODERNIZATION (AST recipes/codemods).
+                                               # != source.language → a PORT (e.g. `go`); see below.
+  runtime:                                     # the platform end-state (keys depend on target.language)
+    java: "21"                                 # java→ java/frameworks/buildSystem; python→ python/…
     frameworks: [ "spring-boot:3.x", "jakarta-ee:10" ]
     buildSystem: maven
+  # --- Python modernization example (source.language: python, target.language: python) ---
+  # runtime: { python: "3.12", frameworks: [ "fastapi", "sqlalchemy:2.x" ], buildSystem: poetry }
+  # removeDebtCategories: [ deprecated-api, outdated-dep, security-fix ]
+  # adoptPatterns: [ pydantic-v2, async-views, type-hints ]
+  # retirePatterns: [ py2-isms, setup_py, requirements-txt-pinning ]
   # --- Cross-language port example (uncomment to port a component to Go) ---
   # language: go                               # triggers `language-port` ChangeUnits (generate strategy)
   # portScope: [ "Payments" ]                  # which capability/component to port (not the whole repo)

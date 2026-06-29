@@ -67,6 +67,12 @@ record resolved versions + toolchainHash → provenance
 → enter INDEX only when every required tool passed `verify`.
 ```
 
+The required set is **filtered by the active language profile**
+(`architecture/language-profiles.md`): the language-agnostic tools plus only the
+tools tagged `lang: <source.language>` in the manifest. So a `python` run verifies
+LibCST/ruff/pip-audit/bandit/pytest and never tries to install Maven or
+OpenRewrite, and a `java` run never installs LibCST.
+
 Preflight is **idempotent** (a present, correct tool is left alone) and **cached**
 (verified once per environment per run). Because the gate covers the whole run's
 required toolchain up front, a missing tool surfaces *before* any analysis work,

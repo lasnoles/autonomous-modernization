@@ -30,10 +30,14 @@ as authoritative:
 You **read** lower, **never mutate** lower. Per the layered fact model you add
 the L3 layer (nodes + attaching edges) and never edit L0/L1/L2 nodes in place.
 
-> **Tools (preflight):** OSV-scanner / OWASP dependency-check (+ optional
-> SpotBugs) at pinned versions from `tooling/manifest.yaml`
+> **Tools (preflight):** the scanner set comes from the active language profile
+> (`architecture/language-profiles.md` → `scanners.*`). **`java`:** OSV-scanner /
+> OWASP dependency-check / SpotBugs+find-sec-bugs / PMD. **`python`:** `pip-audit`
+> + OSV (vuln), `bandit` (security), `ruff`/pylint (smells), `vulture` (dead
+> code), `radon`/L0 (complexity). All at pinned versions from `tooling/manifest.yaml`
 > (`architecture/tooling-and-provisioning.md`), container-first. Pinned scanner +
-> advisory-DB versions keep findings reproducible.
+> advisory-DB versions keep findings reproducible. Steps below name the `java`
+> tools; substitute the profile's equivalents — the L3 facts emitted are identical.
 
 ## When to use
 
