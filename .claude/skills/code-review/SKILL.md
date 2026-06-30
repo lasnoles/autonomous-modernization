@@ -9,7 +9,8 @@ description: >-
   fail-loud — errors must be surfaced (raised, returned, or turned into a tracked
   Gap), never silently ignored unless a strong reason is explicitly recorded. Also
   reviews TEST COVERAGE of the changed code (not just validation's number) and
-  requires a test asserting each flagged error path actually surfaces. Runs per
+  requires a test asserting each flagged error path actually surfaces, and scans for
+  DUPLICATE/reinvented functions and copy-paste the change introduces. Runs per
   ChangeUnit (after VALIDATED, before RISK_SCORED) and as a repo-scope final sweep
   after EXECUTE before INTEGRATE. A high-severity silent-ignore finding is a
   BLOCKING gate. Use to review a CU diff or a completed repo's cumulative change.
@@ -62,7 +63,7 @@ Python exceptions) · the run's review config (`gates.review`, justification all
   "verdict": "approve|approve-with-conditions|reject",
   "findings": [
     { "severity":"high|med|low",
-      "type":"silent-error-swallow|missing-dependency-ignored|untested-error-path|coverage-gap|test-quality|behavioral-risk|rollback-hazard|contract-break|nit",
+      "type":"silent-error-swallow|missing-dependency-ignored|untested-error-path|coverage-gap|test-quality|duplicate-function|copy-paste|behavioral-risk|rollback-hazard|contract-break|nit",
       "location":"file:line", "issue":"...", "endangers":"rule/caller GID",
       "intentMismatch":"what the code does vs. what the spec/flow intends",
       "fix":"...", "justified": false, "justification": null }
@@ -119,6 +120,20 @@ Python exceptions) · the run's review config (`gates.review`, justification all
    Severity: untested error/exception path (dim-1 tie-in) → high (blocking); other coverage/quality
    gaps → med (approve-with-conditions, list the specific tests to add). `gates.review.requireErrorPathTests`
    (default true) makes the error-path case blocking.
+
+7. DUPLICATION / REINVENTION — does the change ADD a function that already exists, or copy-paste a block?
+   Modernization (esp. `generate`/`llm-patch`) tends to re-implement helpers that already exist.
+   • REINVENTION — for each function/method the diff adds, query the graph for an existing Method with
+     the same/similar signature + behavior (cypher: by name/params, and near-equal source-span `hash`
+     from the indexer; CALLS-neighbourhood overlap). If one exists, flag it — call the existing one, don't
+     re-add. Name both `file:line`s.
+   • INTRA-DIFF COPY-PASTE — the same non-trivial block repeated across the diff → extract one helper.
+     Use the profile's copy-paste detector (`scanners.dup`: PMD-CPD java / jscpd ts·py / dupl go) over the
+     changed files; ingest its report in batches (don't inline a whole CPD report).
+   Severity: duplicate of an ordinary function → med (approve-with-conditions: reuse/extract). HIGH
+   (blocking) when the duplicate re-implements a PRESERVES BusinessRule or a security-relevant routine —
+   two divergent copies mean one gets fixed and the other silently rots (a correctness + fail-loud hazard).
+   `gates.review.flagDuplication` (default true).
 ```
 
 ## Justification — the only escape from a blocking error-handling finding
@@ -153,7 +168,7 @@ Findings always feed `risk-assessment` (raise the score) regardless of gating.
   orchestrator transitions on your verdict).
 
 ## Definition of done
-The diff (or the repo's cumulative change) is reviewed across all six dimensions; every error/exception
+The diff (or the repo's cumulative change) is reviewed across all dimensions; every error/exception
 site touched by the change is judged surface-vs-swallow with a citation; missing-dependency handling is
 checked against the fail-loud policy; **changed-code test coverage is reviewed (not just relayed) and
 every flagged error path has a test asserting it surfaces** — an untested error path is a blocking

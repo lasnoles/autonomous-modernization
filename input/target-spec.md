@@ -124,6 +124,9 @@ review:                                         # code-review gate (skill: code-
   requireErrorPathTests: true                   # HARD-block: a flagged error path with no test asserting it
                                                 # surfaces (raises/returns) is unverified — "stopped swallowing"
                                                 # must be proven by a test that fails if it regresses.
+  flagDuplication: true                         # scan for duplicate/reinvented functions + copy-paste the change
+                                                # adds (profile scanners.dup). med (reuse/extract); HIGH/block when
+                                                # it re-implements a PRESERVES rule or security-relevant routine.
   blockSeverity: high                           # severity that blocks (high → PAUSED/NEEDS_HUMAN until fixed/justified)
   justifiedIgnores: []                          # the ONLY escape: explicit allowlist of deliberate ignores, e.g.
                                                 #   - { location: "PaymentClient.java:88", reason: "best-effort metrics; failure is non-fatal", approver: "min" }

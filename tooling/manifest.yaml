@@ -316,6 +316,15 @@ tools:
     optional: true
     usedBy: [semantic-indexer, "all (read)"]
 
+  # REVIEW — duplication detection (code-review skill; profile scanners.dup)
+  - id: jscpd
+    version: "4.x"
+    purpose: "copy-paste / duplicate-block detection (language-agnostic); profile scanners.dup"
+    verify: "jscpd --version"
+    install: { npm: "jscpd@4" }
+    usedBy: [code-review]
+    # java profile may use PMD-CPD instead (ships with PMD); go: `dupl`. Pinned for reproducible findings.
+
   # COMMON
   - id: git
     version: "2.x"

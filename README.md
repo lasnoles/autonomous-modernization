@@ -64,7 +64,7 @@ L5 risk), so each stage queries rather than re-parses.
 | `transformation-compiler` | COMPILE | — | Lowers a ChangeUnit to a candidate diff (recipe → codemod → llm-patch). |
 | `validation` | VALIDATE | — | Build + tests + behavioral equivalence; backfills characterization tests. |
 | `replay` | VALIDATE/audit | — | Golden record-replay equivalence + run reproducibility snapshots. |
-| `code-review` | REVIEW | — | Intent & **fail-loud** review (exception/error handling, no silent-ignore) **+ test-coverage review** (changed-code coverage; every flagged error path must have a test asserting it surfaces); per-CU gate + repo-scope final sweep. Blocking by default. |
+| `code-review` | REVIEW | — | Intent & **fail-loud** review (exception/error handling, no silent-ignore), **test-coverage** review (every flagged error path must have a test), and **duplicate-function/copy-paste** scan; per-CU gate + repo-scope final sweep. Blocking by default. |
 | `risk-assessment` | RISK | L5 | Calibrated risk score + auto/pause/block decision with explanation. |
 | `developer` | EXECUTE | — | Finishes the compiler's diff into working, integrated code (incl. against placeholder interfaces). |
 | `devops` | EXECUTE / INTEGRATE | — | Stands up the service + dependents as **Podman** containers + monitoring. |
