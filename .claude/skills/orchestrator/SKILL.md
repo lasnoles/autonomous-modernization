@@ -30,10 +30,10 @@ Per repo, advance the repo machine; within EXECUTE, advance the ChangeUnit machi
 per CU. Never skip a guard.
 
 ```
-INTAKE → ⟦PREFLIGHT GATE⟧ → INDEX → RECOVER → DISCOVER → DEBT → PLAN → EXECUTE → COMPLETE
-          (all required tools verified before any exploration)
-                                                     └─ per CU: COMPILED →
-                                                        VALIDATED → RISK_SCORED →
+INTAKE → ⟦PREFLIGHT GATE⟧ → INDEX → RECOVER → DISCOVER → DEBT → PLAN → EXECUTE → ⟦REVIEW⟧ → COMPLETE
+          (all required tools verified before any exploration)        │      (repo-scope
+                                                     └─ per CU: COMPILED →     final review)
+                                                        VALIDATED → REVIEWED → RISK_SCORED →
                                                         APPLY → APPLIED (or PAUSED/
                                                         BLOCKED/ROLLED_BACK/FAILED)
 ```
@@ -49,9 +49,11 @@ INTAKE → ⟦PREFLIGHT GATE⟧ → INDEX → RECOVER → DISCOVER → DEBT → 
 | PLAN | `planner` | L0–L3 | L4 + Modernization IR |
 | COMPILED | `transformation-compiler` | IR CU | diff/recipe artifact |
 | VALIDATED | `validation` (+`replay`) | diff, tests | validation report |
-| RISK_SCORED | `risk-assessment` | CU, validation | L5 RiskScore |
+| REVIEWED | `code-review` | diff, validation, PRESERVES | review report (intent & fail-loud) |
+| RISK_SCORED | `risk-assessment` | CU, validation, review | L5 RiskScore |
 | APPLY | (orchestrator) | risk decision | PR behind seam |
 | EXECUTE roles | `developer`, `devops`, `tester` | IR CU, graph | code, Podman env, mocks, E2E |
+| REVIEW (repo, final) | `code-review` | cumulative applied change | repo review report |
 | INTEGRATE | `integration-verifier` | applied system | E2E report, env manifest, gaps |
 | every transition | `run-historian` | event stream | OKF wiki + STATUS.md + status.json + tokens.md |
 
@@ -143,7 +145,14 @@ E2E scenarios):
 - **VALIDATED:** call `validation`; if `equivalence.replay` is set, also run `replay`.
   Guard: green build AND tests pass AND equivalence proven. On failure → FAILED, feed
   back to planner for re-strategy.
-- **RISK_SCORED:** call `risk-assessment`. Apply the gate:
+- **REVIEWED:** call `code-review` on the CU diff (intent & fail-loud, esp. exception/
+  error handling — `.claude/skills/code-review/SKILL.md`). Guard: verdict ∈ {approve,
+  approve-with-conditions}. A high finding that is not justified — above all a silent
+  error-swallow or a missing dependency handled as a silent no-op/default — → PAUSED/
+  NEEDS_HUMAN (raise a Question/Gap), feed back to `developer` to fix (or planner to
+  re-plan); do NOT advance to RISK_SCORED until fixed or a strong reason is recorded
+  (`gates.review.failOnSilentErrorHandling`, default true). Findings feed risk.
+- **RISK_SCORED:** call `risk-assessment` (consumes the review findings). Apply the gate:
   - `risk ≤ autoApplyCeiling` → APPLY
   - `autoApplyCeiling < risk < blockAbove` → PAUSED (await human)
   - `risk ≥ blockAbove` → BLOCKED (needs re-plan, not just approval)
@@ -162,8 +171,15 @@ the checkpoint (atomic), invoke `run-historian` to fold the event into the OKF w
 one wiki update — what makes the run live-monitorable, resumable, auditable (see
 Observability below).
 
-**7. Run INTEGRATE (repo/system scope).** Once all waves APPLIED, call
-`integration-verifier` (workflow `integration-e2e`): `devops` stands up the full
+**6b. Repo-scope final review (after EXECUTE, before INTEGRATE).** Once all waves
+are APPLIED, call `code-review` at repo scope over the cumulative applied change —
+catch cross-CU error-handling regressions and seams that silently degrade. An open
+high finding (unjustified silent error-swallow / missing-dependency no-op) holds the
+repo before INTEGRATE, surfaced as a Question/Gap, until fixed or justified. Never
+enter INTEGRATE with an open blocking review finding.
+
+**7. Run INTEGRATE (repo/system scope).** Once all waves APPLIED and the repo review
+is clear, call `integration-verifier` (workflow `integration-e2e`): `devops` stands up the full
 topology under Podman (migrated service + dependents — real images or placeholder
 mocks — plus monitoring), `tester` loads interface mocks and builds E2E scenarios
 from production traces, the verifier replays those journeys end-to-end and reads

@@ -96,6 +96,9 @@ mirror the IR 1:1 (node-types.md §L4).
                      set tests:["existing","generate-if-missing"];
      • golden     — characterization/replay where tests thin; set replay:true (orchestrator
                      also invokes the replay skill).
+   Carry gates.validation from the spec into the IR (§5): requireGeneratedTests + the
+   minChangedCoverage floor (default 0.80) apply to every code-producing CU — so generated/
+   finished code ships with unit tests and validation hard-gates ≥80% changed-code coverage.
 
 6. PRESERVES — pin behavior that must survive. Query business rules/capabilities each CU's
    targets enforce (cypher "Business rules a change would touch"; "Capability footprint"),

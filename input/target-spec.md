@@ -117,6 +117,21 @@ autonomy:                                      # how far it may go without you
                                                 #   always = always surface the approach proposal for approval
                                                 # complex/heterogeneous estates: keep `review` (or `always`)
 
+review:                                         # code-review gate (skill: code-review) — runs per CU
+                                                # (after VALIDATED, before RISK_SCORED) + repo-scope final sweep.
+  failOnSilentErrorHandling: true               # HARD-block high findings: swallowed exception, ignored error
+                                                # return, missing service handled as silent no-op/default. (fail-loud)
+  requireErrorPathTests: true                   # HARD-block: a flagged error path with no test asserting it
+                                                # surfaces (raises/returns) is unverified — "stopped swallowing"
+                                                # must be proven by a test that fails if it regresses.
+  flagDuplication: true                         # scan for duplicate/reinvented functions + copy-paste the change
+                                                # adds (profile scanners.dup). med (reuse/extract); HIGH/block when
+                                                # it re-implements a PRESERVES rule or security-relevant routine.
+  blockSeverity: high                           # severity that blocks (high → PAUSED/NEEDS_HUMAN until fixed/justified)
+  justifiedIgnores: []                          # the ONLY escape: explicit allowlist of deliberate ignores, e.g.
+                                                #   - { location: "PaymentClient.java:88", reason: "best-effort metrics; failure is non-fatal", approver: "min" }
+                                                # (or an inline `// review:ignore-error reason=… approver=…` at the site)
+
 concurrency:
   maxRepos: 4
   maxCUsPerRepo: 6
@@ -129,9 +144,20 @@ execution:                                     # context/throughput controls —
   flushBetweenBatches: true                    # release each batch from context after writing its results
   flushBetweenStages: true                     # drop a stage's scoped subgraph/spans before the next stage
 
+validation:                                    # gates.validation — the VALIDATED gate (skill: validation)
+  requireGreenBuild: true                      # build must compile/build green
+  requireGeneratedTests: true                  # generated/finished code MUST ship with unit tests (developer +
+                                               # the `generate` port path emit them); a CU adding code with no
+                                               # test for its new logic fails the gate.
+  minChangedCoverage: 0.80                      # HARD floor: ≥80% coverage of the CHANGED lines/branches; below →
+                                               # backfill tests, else gate:false (CU → FAILED). Not whole-repo.
+  minCoverageDelta: 0.0                         # changed-code coverage must also not DROP vs the pre-change baseline
+  requireEquivalence: true                     # equivalence must be proven at the CU's equivalence.level
+
 acceptance:                                    # run-level definition of done
   - "Build green on Java 21 / Spring Boot 3."
   - "All existing + characterization tests pass; no behavioral regression."
+  - "Every changed/generated unit has unit tests; changed-code coverage ≥ 80%."
   - "Payments reachable via seam with v1 fallback and O(1) rollback."
   - "Zero remaining deprecated-api / high-severity vuln debt items in scope."
 ```

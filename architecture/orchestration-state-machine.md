@@ -60,6 +60,11 @@ per CU during the apply stages and can execute many CUs concurrently
         └────┬─────┘   (roles: developer + devops + tester — see §8;       │
              │          each CU runs through its selected playbook's phases)│
              ▼                                                            │
+        ╓──────────╖                                                      │
+        ║  REVIEW  ║  → skill: code-review (repo-scope final sweep over the │
+        ║  (final) ║    cumulative applied change — intent & fail-loud).    │
+        ╙────┬─────╜  Open high finding ⇒ hold before INTEGRATE (Question). │
+             ▼                                                            │
         ┌──────────┐                                                      │
         │INTEGRATE │  → skill: integration-verifier                       │
         └────┬─────┘   stand up full system (Podman) + monitoring,        │
@@ -79,6 +84,16 @@ deferred but their absence is logged. Any unresolved required tool is a blocking
 Question — the repo waits in the gate, it does not start exploring on a partial
 toolchain. This makes "all tools present" an explicit precondition of exploration,
 not a best-effort side task. See `architecture/tooling-and-provisioning.md` §3.
+
+**REVIEW gate guard (per CU + repo):** `code-review` runs per CU between VALIDATED
+and RISK_SCORED, and once at repo scope after EXECUTE before INTEGRATE. A
+high-severity finding that is **not** justified — above all a silent error-swallow
+or a missing dependency/service handled as a silent no-op/default (fail-loud
+policy, `open-question-resolution.md`) — blocks: the CU goes PAUSED/NEEDS_HUMAN and
+the repo holds before INTEGRATE, surfaced as a Question/Gap, until the code is
+fixed or a strong reason is explicitly recorded. `gates.review.failOnSilentErrorHandling`
+(default true) controls this; findings always feed `risk-assessment`. The run never
+reaches COMPLETE with an open blocking review finding.
 
 Guards between analysis stages: each stage must write its layer with
 `status=ok` and no fatal errors before the next begins. INTEGRATE's guard is the
@@ -101,7 +116,12 @@ escalating.
     │  guard: build green AND tests pass AND equivalence proven
     │  fail ─► FAILED ─► (planner re-plan or escalate)
     ▼
- RISK_SCORED ───► skill: risk-assessment
+ REVIEWED ──────► skill: code-review   (intent & fail-loud review of the diff)
+    │  guard: verdict ∈ {approve, approve-with-conditions}
+    │  reject (high finding, esp. silent error-swallow, not justified)
+    │    ─► PAUSED/NEEDS_HUMAN (Question/Gap) ─► developer re-fix or planner re-plan
+    ▼
+ RISK_SCORED ───► skill: risk-assessment   (consumes review findings → score)
     │
     ├─ risk ≤ autoApplyCeiling ───────────────► APPLY
     ├─ autoApplyCeiling < risk < blockAbove ──► PAUSED (await human)

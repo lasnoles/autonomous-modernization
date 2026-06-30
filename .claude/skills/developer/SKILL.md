@@ -63,6 +63,10 @@ external systems, preserve list, allowed changes, design narrative — per
 - Finished, building, integrated code in the worktree — integrations wired,
   assumptions resolved, imports/wiring/config coherent, `mvn`/`gradle` compile +
   module build **green**, staged not committed (orchestrator opens the PR at APPLY).
+- **Unit tests for the new/changed code, in the same diff** (profile test runner) —
+  covering ≥ `gates.validation.minChangedCoverage` (default 80%) of changed lines/
+  branches, including every error-handling branch and the missing-dependency path.
+  Code without its tests is a validation-gate failure, not an acceptable hand-off.
 - New/updated placeholder `InterfaceContract`s + `Gap`s for every dependency not
   resolved to a real interface — typed, plausible, behind a seam/port,
   `placeholder: true`, low `confidence`, back-linked to its Gap (open-question §3,§4).
@@ -124,6 +128,17 @@ You NEVER prove equivalence, score risk, or set CU `status` —
    integration needs, reconcile signatures/imports, satisfy the framework (e.g. Spring
    context wiring after a Jakarta/Boot-3 edit), match the Target Spec design narrative —
    not just "compiles" but the change the plan intended.
+
+5b. WRITE UNIT TESTS for the code you wrote/finished — NOT optional
+   (gates.validation.requireGeneratedTests). Using the profile's test runner (JUnit /
+   pytest / `go test`), cover the new/changed logic to **≥ gates.validation.minChangedCoverage
+   (default 80%)** of changed lines/branches — meaningful assertions on behavior, not
+   line-execution filler. MANDATORY cases: each branch of new error/exception handling
+   (assert it surfaces — raises/returns — not swallowed), the missing/unavailable
+   dependency path (asserts an error, not a silent default), and the happy + boundary
+   paths. Test the business path through the PORT (inject the placeholder/mock adapter).
+   These ship in the SAME diff as the code. Validation backfills only the remainder up to
+   the floor; arriving with code but no tests is a gate failure, not validation's job.
 
 6. PUBLIC CONTRACTS STABLE unless authorized: do not alter public API surface
    (Class.isPublicApi, published Endpoints/events) or any businessRefs[] PRESERVES rule

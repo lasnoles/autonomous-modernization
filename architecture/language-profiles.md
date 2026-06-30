@@ -46,6 +46,7 @@ language has no profile → blocking Question (never guess a toolchain).
 | `scanners.security` | technical-debt §5 | SpotBugs + find-sec-bugs | **bandit** |
 | `scanners.smell` | technical-debt §5 | PMD, SpotBugs, Sonar rules | **ruff**, pylint |
 | `scanners.deadcode` | technical-debt §5 | (graph "dead code candidates") | **vulture** + graph |
+| `scanners.dup` | code-review (duplication) | **PMD-CPD** | **jscpd** (or pylint similarities) — `go`: dupl; `ts`: jscpd |
 | `scanners.complexity` | technical-debt §3 | cyclomatic from L0 | cyclomatic from L0 (or **radon**) |
 | `deprecationDetector` | technical-debt §2 | OpenRewrite `FindDeprecated*` | `pyupgrade`/ruff rules, `DeprecationWarning` mining |
 | `test.runner` | validation | JUnit via maven/gradle | **pytest** (tox/nox) |
