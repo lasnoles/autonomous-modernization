@@ -105,8 +105,9 @@ Python exceptions) · the run's review config (`gates.review`, justification all
 
 6. TEST COVERAGE & TEST QUALITY — don't just relay validation's number; review whether the change is
    actually PROVEN. Read the validation-report's changed-code coverage + the tests touching the diff:
-   • Changed-code coverage below `gates.validation.minCoverageDelta`, OR specific changed methods/
-     branches with no covering test → name them (uncovered `file:line`), don't accept the aggregate %.
+   • Changed-code coverage below `gates.validation.minChangedCoverage` (default 80%), OR specific
+     changed methods/branches with no covering test → name them (uncovered `file:line`), don't accept
+     the aggregate %. (Validation hard-gates the 80% floor; you review whether the RIGHT things are tested.)
    • BRANCH coverage of the error/exception paths flagged in dimension 1 (high — fail-loud tie-in):
      a fix that surfaces an error MUST have a test asserting it now raises/returns (and that the
      missing-service case errors, not silently passes). An untested error path = a blocking finding —

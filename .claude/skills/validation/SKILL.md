@@ -66,7 +66,9 @@ behavior that MUST survive) · pinned toolchain (INTAKE provenance) ·
     "scope": "changed-code",          // NOT whole-repo
     "changedLines": 96, "coveredChangedLines": 91,
     "baselineChangedCoverage": 0.62, "postChangeChangedCoverage": 0.95,
-    "coverageDelta": 0.33, "minCoverageDelta": 0.0, "gate": "pass"
+    "coverageDelta": 0.33, "minCoverageDelta": 0.0,
+    "minChangedCoverage": 0.80,       // HARD floor (gates.validation); default 0.80
+    "gate": "pass"                    // pass ⇔ postChangeChangedCoverage ≥ minChangedCoverage AND delta ≥ minCoverageDelta
   },
   "characterization": { "generated": 7, "recordedAgainst": "baseline", "regressionsDetected": 0 },
   "preserves": [ { "rule": "billing-svc::BusinessRule::no-double-invoice", "test": "InvoiceDoubleBillingIT", "status": "pass" } ],
@@ -79,8 +81,12 @@ behavior that MUST survive) · pinned toolchain (INTAKE provenance) ·
 ```
 
 The `gate` boolean is the contract. **`gate: true` ⇔ build green AND tests pass
-AND equivalence `proven` at the required level AND coverage gate met.** Anything
-else is `gate: false` with a populated `failure`.
+AND equivalence `proven` at the required level AND the coverage gate met —
+changed-code coverage ≥ `gates.validation.minChangedCoverage` (default **0.80**)
+AND ≥ baseline (`minCoverageDelta`).** Anything else is `gate: false` with a
+populated `failure`. The 80% floor is a HARD gate: a CU whose changed code can't
+be brought to ≥80% coverage (after test backfill) does not pass — it goes FAILED,
+never APPLY.
 
 ## The three equivalence levels
 
@@ -89,7 +95,7 @@ Parameterized by `equivalence.level`; each level is a strict superset of the pri
 | Level | What must be proven | Required checks |
 |-------|---------------------|-----------------|
 | **syntactic** | Compiles and passes static analysis; no semantic claim. | build green + static checks (compiler, Checkstyle/Error Prone, no new warnings-as-errors). Tests/coverage **not** required. |
-| **behavioral** | Observable behavior of the changed code is unchanged. | build green + **whole test suite green** + **changed-code coverage** ≥ gate + characterization tests backfilled where changed code is under-covered + PRESERVES rules' tests pass. |
+| **behavioral** | Observable behavior of the changed code is unchanged. | build green + **whole test suite green** + **changed-code coverage ≥ `minChangedCoverage` (default 0.80)** + unit/characterization tests backfilled where changed code is under-covered + PRESERVES rules' tests pass. |
 | **golden** | Output byte/semantically identical to a recorded baseline. | everything in behavioral **plus** a recorded-baseline replay-diff = **0** — the `replay` skill's verdict, which validation incorporates. |
 
 `equivalence.replay: true` always invokes the replay skill regardless of nominal
@@ -113,11 +119,15 @@ level; its verdict becomes a mandatory gate input.
      hard failure (not flaky — see invariants) ──► disproven, gate:false, attach failing tests.
      syntactic ──► skip this step.
 
-4. COVERAGE of CHANGED code only: run JaCoCo restricted to lines/methods touched by
-   THIS diff (not whole-repo). Diff against same metric on pre-change baseline ⇒ coverageDelta.
+4. COVERAGE of CHANGED code only: run the profile coverage tool (JaCoCo/coverage.py/
+   `go test -cover`) restricted to lines/branches touched by THIS diff (not whole-repo).
+   Compare to minChangedCoverage (default 0.80) AND to the pre-change baseline (⇒ delta).
+     coverage ≥ floor AND delta ≥ minCoverageDelta ──► coverage gate pass.
+     below floor ──► go to step 5 (backfill); never pass a behavioral CU under 80%.
 
-5. BACKFILL characterization tests if changed-code coverage < gate AND
-   equivalence.tests ∋ generate-if-missing:
+5. BACKFILL tests if changed-code coverage < minChangedCoverage AND
+   equivalence.tests ∋ generate-if-missing (note: the developer/`generate` path should
+   already have shipped unit tests — backfill covers the remainder up to the floor):
      a. Capture baseline behavior FIRST: on PRE-change code, exercise changed methods/seams,
         record actual outputs (returns, exceptions, emitted events, persisted state) as golden
         assertions. Use test-generator prompt to synthesize characterization tests whose
@@ -125,10 +135,10 @@ level; its verdict becomes a mandatory gate input.
      b. Run those same tests against the TRANSFORMED code: assertions encode pre-change
         behavior, so a behavioral diff makes them FAIL (detect regressions, not pass trivially).
         Add to suite, re-measure changed-code coverage.
-     c. Still short (unreachable/dead branches, unpinnable non-deterministic IO)
-        ──► inconclusive, gate:false; report exactly which changed methods remain unproven.
-   If tests is `existing` only and coverage short ──► inconclusive (do NOT silently pass):
-   plan asked for no backfill, cannot claim behavioral equivalence on uncovered changed code.
+     c. Still below the floor (unreachable/dead branches, unpinnable non-deterministic IO)
+        ──► gate:false (FAILED); report exactly which changed methods remain under 80% and why.
+   If tests is `existing` only and coverage short ──► gate:false (do NOT silently pass):
+   cannot claim behavioral equivalence on under-covered changed code, and the 80% floor is hard.
 
 6. REPLAY when required (equivalence.replay set; always for golden): call replay skill —
    replays recorded traces/golden outputs against transformed code, returns replay-diff.

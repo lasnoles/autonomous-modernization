@@ -103,7 +103,7 @@ You NEVER set `equivalence` results or any CU status — those are the orchestra
 | Catalog recipe matches CU `kind` + language | **recipe** | OpenRewrite (Java), ts-morph (TS), Roslyn (C#) |
 | No recipe, but change is mechanical/AST-shaped | **codemod** | ts-morph / Roslyn fix; **LibCST/pyupgrade/ruff/django-upgrade (Python)** |
 | Needs judgment (ambiguous/business-aware), no deterministic rung applies | **llm-patch** | patch-generator prompt, candidate only |
-| `kind == language-port` (cross-language, no AST recipe can translate) | **generate** | spec-driven synthesis from InterfaceContracts+BusinessRules+Flows+tests+cassettes + target idiom profile (`recipes/port/<lang>/`); candidate, proven black-box (`multi-language-and-porting.md`) |
+| `kind == language-port` (cross-language, no AST recipe can translate) | **generate** | spec-driven synthesis from InterfaceContracts+BusinessRules+Flows+tests+cassettes + target idiom profile (`recipes/port/<lang>/`); **emits unit tests with the generated source (≥`gates.validation.minChangedCoverage`, default 80%; profile scaffold incl. `*_test.*`)**; candidate, proven black-box (`multi-language-and-porting.md`) |
 | Unsafe to automate / under-specified | **manual** | structured hand-off |
 
 - **Engine is the profile's** (`language-profiles.md` → `recipeEngine`). Python has
